@@ -17,12 +17,21 @@ This build session's sandbox shell is unavailable (Anthropic infra disk-space is
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Scaffold, Auth, DB schema+RLS, Navigation, Products/Personas/Knowledge CRUD | Code written, needs `npm install` + migration run + manual smoke test |
-| 2 | Creative Factory: Ideas, Scripts, Kanban workflow | Not started |
-| 3 | Video Upload, Drive import, ffmpeg, transcript, frames, Creative Score | Not started |
+| 1 | Scaffold, Auth, DB schema+RLS, Navigation, Products/Personas/Knowledge CRUD | **Done, deployed to Vercel, verified working in production** |
+| 1.5 | Product image-to-form AI import (OpenAI vision) | Done |
+| 2 (revised) | Creative Generator: Idea → Script → Storyboard, streamlined (no Kanban) | Code written (0002 migration + 3 API routes + UI), needs migration run + smoke test |
+| 3 (revised) | Google Drive public-link video intake + AI video review/scoring | Not started — next up |
 | 4 | Performance CSV import, Net ROI, Dashboard KPIs, Winner Engine | Not started |
 | 5 | Winner DNA, Variations, Learning/Feedback loop | Not started |
 | 6 | QA, RLS audit, error handling, deployment docs | Not started |
+
+### 2026-07-30 scope revision
+Per user request, the full Kanban Creative Factory (IDEA→SCRIPT→PRODUCTION→...→ARCHIVED board with per-card workflow actions) was replaced with a leaner **Creative Generator**: pick Product+Persona → generate N ideas (AI, grounded in Knowledge Base) → select/auto-pick top ideas → generate N scripts (Hook/Belief/Story/Proof/Turning Point/Offer/CTA + timed segments 0-3s/3-10s/10-20s/20-30s/30-45s + shot list + caption + hashtags + thumbnail text) → select/auto-pick top scripts → generate N storyboards (scene-by-scene, AI vs FOOTAGE marked, camera movement, voice over, sound cue — **text only, no AI image generation** per user decision).
+
+Storyboards are exported as a real DB table (`storyboards`), not files — user takes the storyboard data and edits the actual video externally, then brings the finished clip back via Google Drive public link (Phase 3, next).
+
+New tables/columns: `scripts` extended with hook/belief/story/proof/turning_point/offer/timed_script/caption/hashtags/thumbnail_text; new `storyboards` table; `ideas` extended with `angle`.
+New routes: `POST /api/ideas/generate`, `POST /api/scripts/generate`, `POST /api/storyboards/generate` — all OpenAI JSON-mode, Knowledge-Base-grounded, audit-logged to `activity_logs` per MASTER_PROMPT §24.
 
 ## Architecture decisions
 

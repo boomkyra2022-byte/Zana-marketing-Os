@@ -111,5 +111,57 @@ export interface Idea {
   status: string;
   owner_id: string | null;
   parent_winner_id: string | null;
+  source_type?: string | null;
+  angle?: string | null;
+  created_at: string;
+}
+
+export interface Script {
+  id: string;
+  idea_id: string | null;
+  full_script: string | null;
+  shot_list: any;
+  voice_over: string | null;
+  on_screen_text: string | null;
+  cta: string | null;
+  estimated_duration_sec: number | null;
+  production_notes: string | null;
+  score: number | null;
+  status: string;
+  hook: string | null;
+  belief: string | null;
+  story: string | null;
+  proof: string | null;
+  turning_point: string | null;
+  offer: string | null;
+  timed_script: Record<string, string> | null;
+  caption: string | null;
+  hashtags: string[];
+  thumbnail_text: string | null;
+  created_at: string;
+}
+
+export interface StoryboardScene {
+  scene_number: number;
+  time_range: string;
+  source_type: 'AI' | 'FOOTAGE';
+  camera_movement: string | null;
+  visual_description: string;
+  voice_over: string | null;
+  sound_music: string | null;
+  notes: string | null;
+}
+
+export interface Storyboard {
+  id: string;
+  script_id: string | null;
+  creative_id: string | null;
+  title: string | null;
+  total_duration_sec: number | null;
+  tone_mood: string | null;
+  key_message: string | null;
+  scenes: StoryboardScene[];
+  music_plan: any;
+  status: string;
   created_at: string;
 }

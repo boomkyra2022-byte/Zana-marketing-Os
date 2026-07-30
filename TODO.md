@@ -19,20 +19,25 @@ Legend: [x] done+verified · [~] coded, not yet run/verified · [ ] not started
 - [ ] Fix any runtime/type errors found above
 - [ ] Commit checkpoint
 
-## Phase 2 — Creative Factory
-- [ ] Ideas table CRUD + "Generate 100 Ideas" AI endpoint (`POST /api/ideas/generate`)
-- [ ] Ranking/Top-40 selection
-- [ ] Script Factory (`POST /api/scripts/generate`) with HOOK→BELIEF→STORY→PROOF→TURNING POINT→OFFER→CTA structure + script score
-- [ ] Kanban board (IDEA→SCRIPT→PRODUCTION→VIDEO_REVIEW→READY_FOR_ADS→ADS_TEST→WINNER→LOSER→SCALE→ARCHIVED)
-- [ ] Lineage: idea → script → video → ad → winner traceable by creative_id
-- [ ] Run + fix + commit
+## Phase 2 (revised) — Creative Generator
+- [~] supabase/migrations/0002_creative_generator.sql — extend scripts, add storyboards table, add ideas.angle
+- [~] `POST /api/ideas/generate` — KB-grounded, angle-diverse, quantity configurable
+- [~] `POST /api/scripts/generate` — Hook/Belief/Story/Proof/Turning Point/Offer/CTA + timed segments + shot list + caption + hashtags + thumbnail text
+- [~] `POST /api/storyboards/generate` — scene-by-scene, AI vs FOOTAGE, camera/voice/sound, text-only (no image gen)
+- [~] Creative Generator UI (`/creative-factory`) — 3-step wizard wired to real DB/API
+- [ ] **Run migration 0002 on Supabase** (SQL Editor or `supabase db push`)
+- [ ] **Smoke test**: generate 5 ideas for a real product → select 2 → generate scripts → select 1 → generate storyboard → confirm rows in `ideas`/`scripts`/`storyboards` tables
+- [ ] Fix any AI schema-mismatch errors (structured output parsing is strict/zod-validated, may need prompt tuning on first real run)
+- [ ] Run lint/typecheck + commit checkpoint
+- [ ] (Deferred, not requested now) Kanban board / full workflow states — only add if requested later
 
-## Phase 3 — Video Analyzer
-- [ ] Upload MP4/MOV/WEBM to Supabase Storage (`videos` bucket), signed URLs
-- [ ] Google Drive public-link import (server-side download, MIME/size validation, actionable errors)
+## Phase 3 (revised) — Google Drive Intake + AI Video Review
+- [ ] Video record creation from a pasted Google Drive public/shared link (no upload UI needed per current scope — Drive link only)
+- [ ] Server-side validation: is it a valid Drive share link, file accessible, MIME type, size
+- [ ] Server-side download of the Drive file for processing (ffmpeg + transcript), OR lighter-weight first pass using Drive's available metadata — **needs a decision before building**
 - [ ] ffmpeg: audio extraction, frame sampling (dense 0–5s, normal after, configurable max)
 - [ ] Transcription provider call
-- [ ] AI structured Creative Score JSON (schema from MASTER_PROMPT §9), gate thresholds
+- [ ] AI structured Creative Score JSON (schema from MASTER_PROMPT §9): strengths/weaknesses/recommendations/risk flags, gate thresholds
 - [ ] Status machine: UPLOADED→PROCESSING→TRANSCRIBING→ANALYZING→SCORING→DONE→FAILED, shown in UI
 - [ ] Test with 1 real video end-to-end, no mocks
 - [ ] Run + fix + commit
