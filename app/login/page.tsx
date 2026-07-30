@@ -24,11 +24,11 @@ export default function LoginPage({
 
         <form action={signIn} className="space-y-4">
           <div>
-            <label htmlFor="email">Email</label>
+            <label className="field-label" htmlFor="email">Email</label>
             <input id="email" name="email" type="email" required autoComplete="email" />
           </div>
           <div>
-            <label htmlFor="password">Password</label>
+            <label className="field-label" htmlFor="password">Password</label>
             <input id="password" name="password" type="password" required autoComplete="current-password" />
           </div>
           <button type="submit" className="btn-primary w-full">
@@ -40,15 +40,15 @@ export default function LoginPage({
           <summary className="cursor-pointer text-sm text-gray-400">สร้างบัญชีใหม่</summary>
           <form action={signUp} className="space-y-4 mt-4">
             <div>
-              <label htmlFor="full_name">ชื่อ-นามสกุล</label>
+              <label className="field-label" htmlFor="full_name">ชื่อ-นามสกุล</label>
               <input id="full_name" name="full_name" type="text" required />
             </div>
             <div>
-              <label htmlFor="signup_email">Email</label>
+              <label className="field-label" htmlFor="signup_email">Email</label>
               <input id="signup_email" name="email" type="email" required autoComplete="email" />
             </div>
             <div>
-              <label htmlFor="signup_password">Password</label>
+              <label className="field-label" htmlFor="signup_password">Password</label>
               <input id="signup_password" name="password" type="password" required minLength={6} autoComplete="new-password" />
             </div>
             <button type="submit" className="btn-secondary w-full">

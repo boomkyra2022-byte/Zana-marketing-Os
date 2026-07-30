@@ -38,7 +38,7 @@ body {
   padding: 0.5rem 1rem;
 }
 
-input,
+input:not([type='checkbox']):not([type='radio']),
 textarea,
 select {
   background: #0f1012;
@@ -49,9 +49,26 @@ select {
   width: 100%;
 }
 
-label {
+input[type='checkbox'],
+input[type='radio'] {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  accent-color: var(--accent-teal);
+}
+
+/* Small gray field labels (Brand, SKU, etc). Card-wrapper <label> elements
+   used as clickable rows (e.g. idea/script pickers) opt out via .card-label-reset
+   so they render as normal readable text instead of tiny gray captions. */
+.field-label {
   font-size: 0.8rem;
   color: #a5a6ab;
   display: block;
   margin-bottom: 0.25rem;
+}
+
+.card-label-reset {
+  font-size: inherit;
+  color: inherit;
+  margin-bottom: 0;
 }

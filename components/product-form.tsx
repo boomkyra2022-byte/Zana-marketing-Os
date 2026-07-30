@@ -21,23 +21,23 @@ export function ProductForm({
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label htmlFor="brand">Brand *</label>
+          <label className="field-label" htmlFor="brand">Brand *</label>
           <input id="brand" name="brand" defaultValue={product?.brand ?? ''} required />
         </div>
         <div>
-          <label htmlFor="product_name">Product Name *</label>
+          <label className="field-label" htmlFor="product_name">Product Name *</label>
           <input id="product_name" name="product_name" defaultValue={product?.product_name ?? ''} required />
         </div>
         <div>
-          <label htmlFor="sku">SKU</label>
+          <label className="field-label" htmlFor="sku">SKU</label>
           <input id="sku" name="sku" defaultValue={product?.sku ?? ''} />
         </div>
         <div>
-          <label htmlFor="category">Category</label>
+          <label className="field-label" htmlFor="category">Category</label>
           <input id="category" name="category" defaultValue={product?.category ?? ''} />
         </div>
         <div>
-          <label htmlFor="status">Status</label>
+          <label className="field-label" htmlFor="status">Status</label>
           <select id="status" name="status" defaultValue={product?.status ?? 'active'}>
             <option value="active">active</option>
             <option value="inactive">inactive</option>
@@ -46,69 +46,69 @@ export function ProductForm({
         </div>
         <div className="flex items-end gap-2 pb-2">
           <input id="is_hero" name="is_hero" type="checkbox" className="w-4 h-4" defaultChecked={product?.is_hero ?? false} />
-          <label htmlFor="is_hero" className="mb-0">Hero product</label>
+          <label className="field-label" htmlFor="is_hero" className="mb-0">Hero product</label>
         </div>
       </div>
 
       <div className="grid grid-cols-4 gap-4">
         <div>
-          <label htmlFor="selling_price">Selling Price</label>
+          <label className="field-label" htmlFor="selling_price">Selling Price</label>
           <input id="selling_price" name="selling_price" type="number" step="0.01" defaultValue={product?.selling_price ?? ''} />
         </div>
         <div>
-          <label htmlFor="promotion_price">Promotion Price</label>
+          <label className="field-label" htmlFor="promotion_price">Promotion Price</label>
           <input id="promotion_price" name="promotion_price" type="number" step="0.01" defaultValue={product?.promotion_price ?? ''} />
         </div>
         <div>
-          <label htmlFor="cogs">COGS</label>
+          <label className="field-label" htmlFor="cogs">COGS</label>
           <input id="cogs" name="cogs" type="number" step="0.01" defaultValue={product?.cogs ?? ''} />
         </div>
         <div>
-          <label htmlFor="commission_rate">Commission Rate</label>
+          <label className="field-label" htmlFor="commission_rate">Commission Rate</label>
           <input id="commission_rate" name="commission_rate" type="number" step="0.0001" defaultValue={product?.commission_rate ?? ''} />
         </div>
         <div>
-          <label htmlFor="shipping_subsidy">Shipping Subsidy</label>
+          <label className="field-label" htmlFor="shipping_subsidy">Shipping Subsidy</label>
           <input id="shipping_subsidy" name="shipping_subsidy" type="number" step="0.01" defaultValue={product?.shipping_subsidy ?? ''} />
         </div>
         <div>
-          <label htmlFor="stock">Stock</label>
+          <label className="field-label" htmlFor="stock">Stock</label>
           <input id="stock" name="stock" type="number" defaultValue={product?.stock ?? ''} />
         </div>
       </div>
 
       <div>
-        <label htmlFor="usp">USP</label>
+        <label className="field-label" htmlFor="usp">USP</label>
         <textarea id="usp" name="usp" rows={2} defaultValue={product?.usp ?? ''} />
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label htmlFor="ingredients">Ingredients / Material</label>
+          <label className="field-label" htmlFor="ingredients">Ingredients / Material</label>
           <textarea id="ingredients" name="ingredients" rows={2} defaultValue={product?.ingredients ?? ''} />
         </div>
         <div>
-          <label htmlFor="benefits">Benefits</label>
+          <label className="field-label" htmlFor="benefits">Benefits</label>
           <textarea id="benefits" name="benefits" rows={2} defaultValue={product?.benefits ?? ''} />
         </div>
         <div>
-          <label htmlFor="usage">Usage</label>
+          <label className="field-label" htmlFor="usage">Usage</label>
           <textarea id="usage" name="usage" rows={2} defaultValue={product?.usage ?? ''} />
         </div>
         <div>
-          <label htmlFor="customer_objections">Customer Objections</label>
+          <label className="field-label" htmlFor="customer_objections">Customer Objections</label>
           <textarea id="customer_objections" name="customer_objections" rows={2} defaultValue={product?.customer_objections ?? ''} />
         </div>
         <div>
-          <label htmlFor="allowed_claims">Allowed Claims</label>
+          <label className="field-label" htmlFor="allowed_claims">Allowed Claims</label>
           <textarea id="allowed_claims" name="allowed_claims" rows={2} defaultValue={product?.allowed_claims ?? ''} />
         </div>
         <div>
-          <label htmlFor="banned_claims">Banned Claims</label>
+          <label className="field-label" htmlFor="banned_claims">Banned Claims</label>
           <textarea id="banned_claims" name="banned_claims" rows={2} defaultValue={product?.banned_claims ?? ''} />
         </div>
       </div>
       <div>
-        <label htmlFor="compliance_notes">Compliance Notes</label>
+        <label className="field-label" htmlFor="compliance_notes">Compliance Notes</label>
         <textarea id="compliance_notes" name="compliance_notes" rows={2} defaultValue={product?.compliance_notes ?? ''} />
       </div>
 

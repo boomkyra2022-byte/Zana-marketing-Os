@@ -26,11 +26,11 @@ export function KnowledgeForm({
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label htmlFor="title">Title *</label>
+          <label className="field-label" htmlFor="title">Title *</label>
           <input id="title" name="title" defaultValue={item?.title ?? ''} required />
         </div>
         <div>
-          <label htmlFor="type">Type *</label>
+          <label className="field-label" htmlFor="type">Type *</label>
           <select id="type" name="type" defaultValue={item?.type ?? 'FAQ'}>
             {KNOWLEDGE_TYPES.map((t) => (
               <option key={t} value={t}>
@@ -42,27 +42,27 @@ export function KnowledgeForm({
       </div>
 
       <div>
-        <label htmlFor="content">Content *</label>
+        <label className="field-label" htmlFor="content">Content *</label>
         <textarea id="content" name="content" rows={6} defaultValue={item?.content ?? ''} required />
       </div>
 
       <div className="grid grid-cols-3 gap-4">
         <div>
-          <label htmlFor="tags">Tags (comma separated)</label>
+          <label className="field-label" htmlFor="tags">Tags (comma separated)</label>
           <input id="tags" name="tags" defaultValue={item?.tags?.length ? item.tags.join(', ') : ''} />
         </div>
         <div>
-          <label htmlFor="source">Source</label>
+          <label className="field-label" htmlFor="source">Source</label>
           <input id="source" name="source" defaultValue={item?.source ?? ''} />
         </div>
         <div>
-          <label htmlFor="confidence">Confidence (0-100)</label>
+          <label className="field-label" htmlFor="confidence">Confidence (0-100)</label>
           <input id="confidence" name="confidence" type="number" min={0} max={100} defaultValue={item?.confidence ?? ''} />
         </div>
       </div>
 
       <div>
-        <label htmlFor="status">Status</label>
+        <label className="field-label" htmlFor="status">Status</label>
         <select id="status" name="status" defaultValue={item?.status ?? 'active'}>
           <option value="active">active</option>
           <option value="deprecated">deprecated</option>

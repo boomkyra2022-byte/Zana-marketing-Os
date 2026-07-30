@@ -129,7 +129,7 @@ export function CreativeGenerator({ products, personas }: { products: ProductOpt
         <h2 className="font-semibold mb-4">1. Generate Idea</h2>
         <div className="grid grid-cols-4 gap-4 mb-4">
           <div>
-            <label>Product</label>
+            <label className="field-label">Product</label>
             <select value={productId} onChange={(e) => setProductId(e.target.value)}>
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -139,7 +139,7 @@ export function CreativeGenerator({ products, personas }: { products: ProductOpt
             </select>
           </div>
           <div>
-            <label>Persona (ไม่บังคับ)</label>
+            <label className="field-label">Persona (ไม่บังคับ)</label>
             <select value={personaId} onChange={(e) => setPersonaId(e.target.value)}>
               <option value="">— ไม่ระบุ —</option>
               {personas.map((p) => (
@@ -150,11 +150,11 @@ export function CreativeGenerator({ products, personas }: { products: ProductOpt
             </select>
           </div>
           <div>
-            <label>จำนวน Idea</label>
+            <label className="field-label">จำนวน Idea</label>
             <input type="number" min={1} max={100} value={ideaQty} onChange={(e) => setIdeaQty(Number(e.target.value))} />
           </div>
           <div>
-            <label>Objective (ไม่บังคับ)</label>
+            <label className="field-label">Objective (ไม่บังคับ)</label>
             <input value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="เช่น เพิ่มยอดขาย, สร้าง awareness" />
           </div>
         </div>
@@ -207,7 +207,7 @@ export function CreativeGenerator({ products, personas }: { products: ProductOpt
                 <input
                   type="number"
                   min={1}
-                  className="w-20"
+                  style={{ width: '5rem' }}
                   value={storyboardQty}
                   onChange={(e) => setStoryboardQty(Number(e.target.value))}
                 />
