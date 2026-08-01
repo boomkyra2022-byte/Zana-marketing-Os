@@ -16,7 +16,7 @@ Legend: [x] done+verified · [~] coded, not yet run/verified · [ ] not started
 - [x] **Run `npm install`, fix build errors** — done (execution policy fixed, dep install ok)
 - [x] **Run migration 0003 on the existing Supabase project** — applied
 - [x] **Smoke test**: login, product exists, dashboard reachable — confirmed via live browser test
-- [ ] Commit checkpoint (new git repo or reuse existing — user's call)
+- [x] Commit checkpoint — pushed to existing repo (boomkyra2022-byte/Zana-marketing-Os), V1 preserved on `v1-legacy` branch, deployed live on Vercel
 
 ## Phase 2 — Creative Generator
 - [x] STEP 1 Generate Ideas — tested live: 5 ideas generated, Thai hooks, varied angles, score 1-10 ✅
@@ -29,23 +29,23 @@ Legend: [x] done+verified · [~] coded, not yet run/verified · [ ] not started
 - [x] Run + fix (creative_id bug) — commit still pending
 
 ## Phase 3 — Video Analyzer
-- [ ] Google Drive public-link import: extract file id, server-side download, validate type/size, temp file, cleanup
-- [ ] Readable Thai errors: permission denied / invalid link / too large / unsupported format / download failed
-- [ ] ffprobe metadata, ffmpeg audio extraction, frame sampling (dense 0-5s, then 1 frame/2-3s, scene-change if feasible, configurable max)
-- [ ] Transcription call
-- [ ] AI analysis: hook, pacing, message, proof, offer/CTA, product appearance, storyboard comparison if linked
-- [ ] Creative Score: 7 dimensions (Hook 20/Retention-Pacing 15/Message Clarity 15/Product-Benefit 15/Proof-Trust 10/Offer-CTA 15/Native-Execution 10), verdict thresholds
-- [ ] Timestamp Fix Recommendations: {start_time,end_time,status:KEEP|FIX|IMPROVE,finding,recommendation}
-- [ ] Progress states: DOWNLOADING/EXTRACTING/TRANSCRIBING/ANALYZING/SCORING/DONE/FAILED shown in UI
-- [ ] Test with 1 real video end-to-end
+- [~] Google Drive public-link import: extract file id, server-side download (confirm-token handling for large files), validate type/size via content-length + content-type, temp file in os.tmpdir(), cleanup in `finally` (`lib/media/drive.ts`)
+- [~] Readable Thai errors: permission denied / invalid link / too large / unsupported format / download failed
+- [~] ffprobe metadata, ffmpeg audio extraction, frame sampling (dense 0-5s every 1s, then every ~2.5s, capped at configurable max frames, resized to 480px) (`lib/media/ffmpeg.ts`) — scene-change detection not implemented, timestamp-based sampling only
+- [~] Transcription call — `transcribeAudio()` in `lib/ai/openai.ts`, default model `gpt-4o-mini-transcribe`
+- [~] AI analysis: hook, pacing, message, proof, offer/CTA, storyboard comparison if linked — one combined vision call (`callOpenAIVisionJSON`) per "batch vision where possible" (`prompts/video-analyzer.ts`)
+- [~] Creative Score: 7 dimensions + verdict thresholds (`prompts/creative-score.ts`)
+- [~] Timestamp Fix Recommendations: {start_time,end_time,status:KEEP|FIX|IMPROVE,finding,recommendation}
+- [~] Progress states: DOWNLOADING/EXTRACTING/TRANSCRIBING/ANALYZING/SCORING/DONE/FAILED — streamed live via NDJSON response + persisted to `videos.status` for refresh recovery
+- [ ] **Test with 1 real video end-to-end** (not yet run — needs migrations 0004+0005, npm install for ffmpeg-static/ffprobe-static, Vercel Pro plan for maxDuration=300)
 - [ ] Run + fix + commit
 
 ## Phase 4 — V2 Loop
-- [ ] Storyboard vs Final comparison (scene order/hook/product reveal/proof/CTA/pacing/missing scenes/text/sound) → Followed/Changed/Missing/Recommendation
-- [ ] Revised V2 Recommendation: Priority Fixes 1-5, Revised Script V2 (same framework), Revised Edit Plan
-- [ ] "Generate V2 Storyboard" button
-- [ ] Winners: mark video as winner, store hook/format/persona/funnel/score/why/replicable pattern/notes
-- [ ] Actions: Use as Reference / Generate New Ideas From Winner
+- [~] Storyboard vs Final comparison (aspect/planned/actual/Followed|Changed|Missing/result/recommendation) — folded into the same Analyze call, not a separate step
+- [~] Revised V2 Recommendation: Priority Fixes 1-5, Revised Script V2 (same 7-part framework, inserted as a real `scripts` row), Revised Edit Plan — on-demand via `POST /api/creative/videos/:id/revise` (`prompts/v2-rewrite.ts`), not automatic (cost control)
+- [~] "Generate V2 Storyboard" button — reuses the existing Phase 2 `/api/creative/storyboards/generate` route with the new revised-script id, no new storyboard-gen code
+- [ ] Winners: mark video as winner, store hook/format/persona/funnel/score/why/replicable pattern/notes — not started
+- [ ] Actions: Use as Reference / Generate New Ideas From Winner — not started
 - [ ] Run + fix + commit
 
 ## Phase 5 — QA / Deploy

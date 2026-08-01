@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { saveAiSettings, saveScoringSettings } from './actions';
 
@@ -88,6 +89,16 @@ export default async function SettingsPage() {
       <div className="card p-5">
         <h2 className="text-lg font-semibold mb-2">Google Drive</h2>
         <p className="text-gray-500">V1 รองรับ public/shared link เท่านั้น — Google OAuth reserved สำหรับ phase ถัดไป</p>
+      </div>
+
+      <div className="card p-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold mb-1">ทีม (Team)</h2>
+          <p className="text-gray-500">สร้าง account ให้พนักงาน และกำหนดสิทธิ์การใช้งาน (admin เท่านั้น)</p>
+        </div>
+        <Link href="/settings/team" className="btn-secondary whitespace-nowrap">
+          จัดการทีม →
+        </Link>
       </div>
     </div>
   );
