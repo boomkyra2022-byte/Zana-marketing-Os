@@ -38,6 +38,8 @@ export async function probeMetadata(filePath: string): Promise<VideoMetadata> {
   const probePath = ffprobeStatic.path;
   ensureExecutable(probePath);
   try {
+    console.log('[ffprobe] path:', probePath, 'exists:', fs.existsSync(probePath));
+    console.log('[ffprobe] input file size:', fs.existsSync(filePath) ? fs.statSync(filePath).size : 'MISSING');
     const { stdout } = await execFileAsync(probePath, [
       '-v', 'error',
       '-print_format', 'json',
@@ -49,6 +51,7 @@ export async function probeMetadata(filePath: string): Promise<VideoMetadata> {
     const videoStream = (json.streams ?? []).find((s: any) => s.codec_type === 'video');
     const durationSec = Number(json.format?.duration ?? videoStream?.duration ?? 0);
     if (!durationSec || Number.isNaN(durationSec)) {
+      console.error('[ffprobe] no duration found, raw output:', stdout.slice(0, 2000));
       throw new MediaProcessingError('อ่านข้อมูลวิดีโอไม่สำเร็จ (ไม่พบความยาวไฟล์) — ไฟล์อาจเสียหายหรือไม่ใช่วิดีโอที่รองรับ', 'probe');
     }
     return {
@@ -57,8 +60,9 @@ export async function probeMetadata(filePath: string): Promise<VideoMetadata> {
       height: videoStream?.height ?? null,
       codec: videoStream?.codec_name ?? null
     };
-  } catch (err) {
+  } catch (err: any) {
     if (err instanceof MediaProcessingError) throw err;
+    console.error('[ffprobe] failed:', err?.message, err?.stderr || err?.stdout || '');
     throw new MediaProcessingError('อ่านข้อมูลวิดีโอไม่สำเร็จ — ไฟล์อาจเสียหายหรือไม่ใช่วิดีโอที่รองรับ', 'probe');
   }
 }

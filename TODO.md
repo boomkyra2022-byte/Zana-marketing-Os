@@ -37,7 +37,7 @@ Legend: [x] done+verified · [~] coded, not yet run/verified · [ ] not started
 - [~] Creative Score: 7 dimensions + verdict thresholds (`prompts/creative-score.ts`)
 - [~] Timestamp Fix Recommendations: {start_time,end_time,status:KEEP|FIX|IMPROVE,finding,recommendation}
 - [~] Progress states: DOWNLOADING/EXTRACTING/TRANSCRIBING/ANALYZING/SCORING/DONE/FAILED — streamed live via NDJSON response + persisted to `videos.status` for refresh recovery
-- [ ] **Test with 1 real video end-to-end** (not yet run — needs migrations 0004+0005, npm install for ffmpeg-static/ffprobe-static, Vercel Pro plan for maxDuration=300)
+- [~] **Test with 1 real video end-to-end** — first live attempt failed at ffprobe step ("อ่านข้อมูลวิดีโอไม่สำเร็จ"), root cause unknown yet. Added console.error logging to `lib/media/ffmpeg.ts` (ffprobe binary path/exists, downloaded file size, raw ffprobe stderr) to diagnose via Vercel Runtime Logs on next attempt — likely either the ffmpeg-static/ffprobe-static binary not present in the Vercel function bundle, or the downloaded file not being a real video.
 - [ ] Run + fix + commit
 
 ## Phase 4 — V2 Loop
