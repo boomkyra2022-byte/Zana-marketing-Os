@@ -136,7 +136,9 @@ export async function transcribeAudio(opts: { fileBuffer: Buffer; filename: stri
   const model = opts.model || process.env.TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe';
 
   const form = new FormData();
-  form.append('file', new Blob([opts.fileBuffer]), opts.filename);
+  // Uint8Array (not Node's Buffer subtype) is what TS's BlobPart type expects
+  // in strict mode — Buffer<ArrayBufferLike> doesn't structurally match.
+  form.append('file', new Blob([new Uint8Array(opts.fileBuffer)]), opts.filename);
   form.append('model', model);
 
   let res: Response;
