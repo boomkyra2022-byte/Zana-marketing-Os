@@ -38,7 +38,7 @@ Explicitly out of scope for V1 of V2 (per MASTER_PROMPT_V2 "Explicitly Out of Sc
 |---|---|---|
 | 1 | Scaffold, Auth, DB (additive), top-nav, Products/Personas/Knowledge/Settings CRUD | Done, verified live in production |
 | 2 | Creative Generator: Ideas → Scripts → Storyboards (rich V2 fields), Copy/Export | Done, verified live in production |
-| 3 | Video Analyzer: Drive import, ffmpeg, transcript, frames, Creative Score (7 dims), timeline fixes | Code complete, pending run+test — needs migrations 0004 + 0005 |
+| 3 | Video Analyzer: Drive import, ffmpeg, transcript, frames, Creative Score (7 dims), timeline fixes | Done, verified live in production |
 | 4 | V2 Loop: storyboard-vs-final comparison, Revised Script V2, Generate V2 Storyboard, Winners | Not started (comparison + revised script folded into Phase 3 build, see below) |
 | 5 | QA/Deploy: security, RLS, errors, loading, cost control, responsive, docs | Not started |
 
@@ -73,6 +73,14 @@ Explicitly out of scope for V1 of V2 (per MASTER_PROMPT_V2 "Explicitly Out of Sc
 - The existing `on_auth_user_created` trigger (0001) always creates the `profiles` row with `role='viewer'`; `createTeamMember` immediately bumps it to the chosen role.
 - `updateMemberRole` / `removeMember` reuse the normal RLS-bound client where possible (`profiles_update_self_or_admin` policy already allows admin/owner to update any profile) — service-role client is only used for the two things RLS genuinely can't do: creating/deleting an `auth.users` row.
 - Deleting a user cascades to `profiles` automatically (`profiles.id references auth.users(id) on delete cascade`), so `removeMember` is a single `auth.admin.deleteUser` call.
+
+**Editor tool (`/editor`, real nav item — unlike Team, this is a daily-use content tool, not admin-only, so nav goes from 8→9 items)**: silence-cut, subtitle burn-in ("Render"), SRT-only export, AI-watermark removal, modeled on tamsub.com and delegated entirely to the real Tamsub API (`https://api.tamsub.com`, confirmed via their public `/developers` docs — the user's originally pasted example script/CLI was not accurate to the real API surface). Sound-effect insertion was explicitly descoped (Tamsub doesn't support it; user chose to skip rather than build a separate ffmpeg feature for it).
+- **Corrected the "direct file upload from device" input the user initially chose**: Vercel Functions have a hard, non-configurable 4.5MB limit on both request and response bodies. A real video clip almost always exceeds this in either direction, so raw upload-through-our-server is not viable on this host. Source input instead reuses the proven `lib/media/drive.ts` pattern, generalized in `lib/media/source.ts` to also accept any direct HTTPS URL (not just Drive) — this is also what enables chaining one operation's output straight into the next operation's input.
+- No local ffmpeg involved in this feature at all — all actual processing (silence detection/cut, subtitle burn-in, SRT generation, dewatermarking) happens server-side at Tamsub; our route just downloads the source, forwards it as multipart to the right Tamsub endpoint (`/v1/silence-cut`, `/v1/renders`, `/v1/subtitles`, `/v1/dewatermark`), and relays the result.
+- Results are delivered via a private Supabase Storage bucket (`edited-clips`) + 24h signed URL (`lib/supabase/storage.ts`), not streamed back through the Vercel function response — same 4.5MB-limit workaround, in the outbound direction this time. SRT text results are small enough to return inline in the JSON response instead.
+- `POST /api/tools/editor/run` streams NDJSON progress (`DOWNLOADING → PROCESSING → UPLOADING → DONE/FAILED`), same pattern as `/api/creative/videos/import`, persisted to a new `editor_jobs` table (`0006_editor_jobs.sql`, additive) for job history + re-downloadable results after the signed URL expires (`GET /api/tools/editor/jobs/:id/download` re-signs on demand).
+- Extracted `cleanupFiles` out of `lib/media/ffmpeg.ts` into `lib/media/fs-utils.ts` so this ffmpeg-free route doesn't pull the `ffmpeg-static`/`ffprobe-static` native binaries into its function bundle just for a temp-file delete.
+- Billing awareness surfaced directly in the UI per Tamsub's model: Render/SRT consume 1 "clip" credit per successful job; silence-cut/dewatermark are free on paid Tamsub plans.
 
 ## Definition of Done
 See TODO.md — mapped 1:1 to MASTER_PROMPT_V2 "Definition of Done" (25 items).

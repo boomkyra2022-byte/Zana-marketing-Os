@@ -37,7 +37,7 @@ Legend: [x] done+verified · [~] coded, not yet run/verified · [ ] not started
 - [~] Creative Score: 7 dimensions + verdict thresholds (`prompts/creative-score.ts`)
 - [~] Timestamp Fix Recommendations: {start_time,end_time,status:KEEP|FIX|IMPROVE,finding,recommendation}
 - [~] Progress states: DOWNLOADING/EXTRACTING/TRANSCRIBING/ANALYZING/SCORING/DONE/FAILED — streamed live via NDJSON response + persisted to `videos.status` for refresh recovery
-- [~] **Test with 1 real video end-to-end** — first live attempt failed at ffprobe step ("อ่านข้อมูลวิดีโอไม่สำเร็จ"), root cause unknown yet. Added console.error logging to `lib/media/ffmpeg.ts` (ffprobe binary path/exists, downloaded file size, raw ffprobe stderr) to diagnose via Vercel Runtime Logs on next attempt — likely either the ffmpeg-static/ffprobe-static binary not present in the Vercel function bundle, or the downloaded file not being a real video.
+- [x] **Test with 1 real video end-to-end** — confirmed working live in production. Root cause of the earlier `spawn .../ffprobe ENOENT` failures: Vercel's file tracer doesn't auto-include native binaries accessed via runtime fs path (not `require()`'d). Two `outputFileTracingIncludes` key-format guesses didn't work; fixed by adding `experimental.serverComponentsExternalPackages: ['ffmpeg-static', 'ffprobe-static']` in `next.config.mjs` (the standard fix for native-binary npm packages on Vercel — same approach Vercel's own `vercel-labs/ffmpeg-on-vercel` reference repo uses). Full pipeline verified live: Drive download → ffprobe → audio extract → transcribe → frame sample → AI vision scoring → 7-dimension breakdown rendered correctly (72/100, REVISE, all dimensions with what-works/what-hurts/recommendation).
 - [ ] Run + fix + commit
 
 ## Phase 4 — V2 Loop
@@ -47,6 +47,18 @@ Legend: [x] done+verified · [~] coded, not yet run/verified · [ ] not started
 - [ ] Winners: mark video as winner, store hook/format/persona/funnel/score/why/replicable pattern/notes — not started
 - [ ] Actions: Use as Reference / Generate New Ideas From Winner — not started
 - [ ] Run + fix + commit
+
+## Editor tool (added beyond MASTER_PROMPT_V2 scope, explicit user request)
+- [~] `supabase/migrations/0006_editor_jobs.sql` — `editor_jobs` table + RLS + private `edited-clips` storage bucket
+- [~] `lib/media/source.ts` — generalized downloader (Drive link OR direct HTTPS URL), enables result-chaining
+- [~] `lib/tamsub/client.ts` — wraps all 4 Tamsub endpoints (silence-cut, renders, subtitles, dewatermark), Thai error mapping for documented HTTP codes (401/403/413/429/400/500)
+- [~] `lib/supabase/storage.ts` — `uploadEditedClip()` / `resignEditedClip()` via service-role client + signed URL (bypasses Vercel's 4.5MB response-body limit)
+- [~] `POST /api/tools/editor/run` — NDJSON streaming orchestrator (DOWNLOADING/PROCESSING/UPLOADING/DONE/FAILED)
+- [~] `GET /api/tools/editor/jobs/:id/download` — re-sign an expired result URL on demand
+- [~] `/editor` page + `editor-client.tsx` — operation selector, source input, per-op tuning fields, billing notice, result preview (video or SRT text), "use result as next source" chaining button, job history table
+- [~] Nav item added (`components/nav-items.ts`, 8→9 items — Editor is a daily-use tool, unlike admin-only Team which stayed a Settings sub-page)
+- [~] `.env.example` — added `TAMSUB_API_TOKEN`
+- [ ] Run migration 0006 on Supabase, set `TAMSUB_API_TOKEN`, smoke test all 4 operations end-to-end, commit + push + deploy
 
 ## Phase 5 — QA / Deploy
 - [ ] Security: server-side keys only, RLS review, signed/private storage, Drive URL validation, filename sanitization, file size limits, timeouts, AI rate limits

@@ -122,12 +122,7 @@ export async function extractFrames(filePath: string, plan: FramePlan[], tmpDir:
   return results;
 }
 
-export function cleanupFiles(paths: string[]) {
-  for (const p of paths) {
-    try {
-      if (fs.existsSync(p)) fs.unlinkSync(p);
-    } catch {
-      /* best-effort cleanup */
-    }
-  }
-}
+// Re-exported from fs-utils (not redefined here) so callers that only need
+// cleanup — like the Tamsub-backed Editor route — can import it without
+// pulling ffmpeg-static/ffprobe-static into their function bundle.
+export { cleanupFiles } from './fs-utils';
