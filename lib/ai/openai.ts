@@ -169,3 +169,66 @@ export async function transcribeAudio(opts: { fileBuffer: Buffer; filename: stri
 
   return { text, model };
 }
+
+export interface TranscribedWord {
+  word: string;
+  start: number;
+  end: number;
+}
+
+// Word-level timestamps for punchy-subtitle generation (Editor tool). Uses
+// whisper-1 specifically — as of writing, that's the only transcription
+// model on the /v1/audio/transcriptions endpoint that honors
+// timestamp_granularities=word; gpt-4o(-mini)-transcribe only return text.
+// Real per-word start/end (not averaged over character count) is what lets
+// the punchy-subtitle prompt group words into cues without ever having to
+// fake timing.
+export async function transcribeAudioWithTimestamps(opts: {
+  fileBuffer: Buffer;
+  filename: string;
+  model?: string;
+  timeoutMs?: number;
+}): Promise<{ text: string; words: TranscribedWord[]; durationSec: number; model: string }> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new AIProviderError('OPENAI_API_KEY is not configured in .env.local', 500);
+  }
+  const model = opts.model || 'whisper-1';
+
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array(opts.fileBuffer)]), opts.filename);
+  form.append('model', model);
+  form.append('response_format', 'verbose_json');
+  form.append('timestamp_granularities[]', 'word');
+
+  let res: Response;
+  try {
+    res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 180000)
+    });
+  } catch (err: any) {
+    if (err?.name === 'TimeoutError') {
+      throw new AIProviderError(`Transcription timed out after ${(opts.timeoutMs ?? 180000) / 1000}s`, 504);
+    }
+    throw new AIProviderError(err?.message || 'Unknown error calling transcription provider', 502);
+  }
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new AIProviderError(`Transcription error (${res.status}): ${errText.slice(0, 400)}`, 502);
+  }
+
+  const json = await res.json();
+  const text = json.text;
+  const words = Array.isArray(json.words)
+    ? json.words.map((w: any) => ({ word: String(w.word ?? ''), start: Number(w.start ?? 0), end: Number(w.end ?? 0) }))
+    : [];
+  if (typeof text !== 'string' || words.length === 0) {
+    throw new AIProviderError('Transcription provider returned no word-level timestamps — model may not support timestamp_granularities', 502);
+  }
+
+  return { text, words, durationSec: Number(json.duration ?? 0), model };
+}

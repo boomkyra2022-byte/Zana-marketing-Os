@@ -6,21 +6,27 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '@/lib/supabase/server';
 import { downloadSourceVideo, SourceImportError } from '@/lib/media/source';
 import { cleanupFiles } from '@/lib/media/fs-utils';
+import { extractAudio, probeMetadata, MediaProcessingError } from '@/lib/media/ffmpeg';
 import { uploadEditedClip } from '@/lib/supabase/storage';
 import { tamsubSilenceCut, tamsubRender, tamsubSubtitlesSrt, tamsubDewatermark, TamsubError, type TamsubResult } from '@/lib/tamsub/client';
+import { transcribeAudioWithTimestamps, callOpenAIJSON, AIProviderError } from '@/lib/ai/openai';
+import { buildPunchySubtitlePrompt, PROMPT_VERSION_PUNCHY_SUBTITLE } from '@/prompts/punchy-subtitle';
+import { repairCueCoverage, resolveCueTimestamps, cuesToSrt, type RawCue } from '@/lib/media/srt';
 
-// Editor tool (silence-cut / subtitle burn-in / SRT export / dewatermark),
-// delegating all actual video processing to the Tamsub API — no local
-// ffmpeg needed here. Streamed NDJSON progress, same pattern as
-// /api/creative/videos/import, since a real Tamsub call + storage upload can
-// take a while and the UI should show live status.
+// Editor tool (silence-cut / subtitle burn-in / SRT export / dewatermark /
+// punchy-subtitle). Most operations delegate to the Tamsub API — no local
+// ffmpeg needed for those. PUNCHY_SRT is the exception: it runs its own
+// Whisper word-timestamp + GPT cue-grouping pipeline (see
+// prompts/punchy-subtitle.ts) so we control the exact Thai segmentation
+// rules instead of relying on Tamsub's opaque captioning. Streamed NDJSON
+// progress, same pattern as /api/creative/videos/import.
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const MAX_BYTES_DEFAULT = 300 * 1024 * 1024;
 
 const requestSchema = z.object({
-  operation: z.enum(['SILENCE_CUT', 'RENDER', 'SUBTITLE_SRT', 'DEWATERMARK']),
+  operation: z.enum(['SILENCE_CUT', 'RENDER', 'SUBTITLE_SRT', 'DEWATERMARK', 'PUNCHY_SRT']),
   source_url: z.string().min(1),
   product_id: z.string().uuid().nullable().optional(),
   template_id: z.string().optional(),
@@ -28,6 +34,73 @@ const requestSchema = z.object({
   threshold_db: z.number().optional(),
   min_silence_ms: z.number().optional()
 });
+
+const punchyCuesSchema = z.object({
+  cues: z.array(
+    z.object({
+      start_word_index: z.number().int().min(0),
+      end_word_index: z.number().int().min(0),
+      text: z.string()
+    })
+  )
+});
+
+async function runPunchySubtitle(
+  sourcePath: string,
+  runId: string,
+  tmpDir: string,
+  productId: string | null,
+  supabase: ReturnType<typeof createClient>
+): Promise<{ text: string }> {
+  const audioPath = path.join(tmpDir, `editor_${runId}_audio.mp3`);
+  try {
+    const metadata = await probeMetadata(sourcePath);
+    await extractAudio(sourcePath, audioPath);
+    const audioBuffer = fs.readFileSync(audioPath);
+
+    const { words } = await transcribeAudioWithTimestamps({ fileBuffer: audioBuffer, filename: 'audio.mp3' });
+
+    let productName: string | null = null;
+    let brand: string | null = null;
+    if (productId) {
+      const { data: product } = await supabase.from('products').select('product_name, brand').eq('id', productId).single();
+      productName = product?.product_name ?? null;
+      brand = product?.brand ?? null;
+    }
+
+    const { system, user: userPrompt } = buildPunchySubtitlePrompt({
+      words,
+      durationSec: metadata.durationSec,
+      productName,
+      brand,
+      knownTerms: []
+    });
+
+    const { text: aiText } = await callOpenAIJSON({ system, user: userPrompt, temperature: 0.2, timeoutMs: 120000 });
+
+    let rawCues: RawCue[];
+    try {
+      const parsedJson = JSON.parse(aiText);
+      const validated = punchyCuesSchema.safeParse(parsedJson);
+      if (!validated.success) {
+        throw new Error(`AI response did not match expected schema: ${JSON.stringify(validated.error.flatten())}`);
+      }
+      rawCues = validated.data.cues;
+    } catch (err: any) {
+      throw new AIProviderError(err.message || 'AI response was not valid JSON', 502);
+    }
+
+    const repaired = repairCueCoverage(words, rawCues);
+    const timedCues = resolveCueTimestamps(words, repaired);
+    if (timedCues.length === 0) {
+      throw new AIProviderError('สร้าง subtitle ไม่สำเร็จ — AI ไม่ได้คืนค่า cue ที่ใช้ได้', 502);
+    }
+
+    return { text: cuesToSrt(timedCues) };
+  } finally {
+    cleanupFiles([audioPath]);
+  }
+}
 
 export async function POST(request: Request) {
   const supabase = createClient();
@@ -96,34 +169,39 @@ export async function POST(request: Request) {
         await setStatus(job.id, 'DOWNLOADING');
         await downloadSourceVideo(input.source_url, sourcePath, { maxBytes: MAX_BYTES_DEFAULT });
 
-        // ---- PROCESSING (delegated to Tamsub) ----
+        // ---- PROCESSING (Tamsub for most ops; own Whisper+GPT pipeline for PUNCHY_SRT) ----
         await setStatus(job.id, 'PROCESSING');
-        const fileBuffer = fs.readFileSync(sourcePath);
         const filename = `source_${runId}.mp4`;
 
         let result: TamsubResult;
-        switch (input.operation) {
-          case 'SILENCE_CUT':
-            result = await tamsubSilenceCut(fileBuffer, filename, {
-              threshold_db: input.threshold_db,
-              min_silence_ms: input.min_silence_ms
-            });
-            break;
-          case 'RENDER':
-            result = await tamsubRender(fileBuffer, filename, {
-              template_id: input.template_id,
-              language: input.language
-            });
-            break;
-          case 'SUBTITLE_SRT':
-            result = await tamsubSubtitlesSrt(fileBuffer, filename, { language: input.language });
-            break;
-          case 'DEWATERMARK':
-            result = await tamsubDewatermark(fileBuffer, filename);
-            break;
-          default:
-            // Unreachable given the zod enum above — satisfies TS definite-assignment.
-            throw new Error(`Unsupported operation: ${input.operation}`);
+        if (input.operation === 'PUNCHY_SRT') {
+          const punchy = await runPunchySubtitle(sourcePath, runId, tmpDir, input.product_id ?? null, supabase);
+          result = { kind: 'text', text: punchy.text, meta: { prompt_version: PROMPT_VERSION_PUNCHY_SUBTITLE } };
+        } else {
+          const fileBuffer = fs.readFileSync(sourcePath);
+          switch (input.operation) {
+            case 'SILENCE_CUT':
+              result = await tamsubSilenceCut(fileBuffer, filename, {
+                threshold_db: input.threshold_db,
+                min_silence_ms: input.min_silence_ms
+              });
+              break;
+            case 'RENDER':
+              result = await tamsubRender(fileBuffer, filename, {
+                template_id: input.template_id,
+                language: input.language
+              });
+              break;
+            case 'SUBTITLE_SRT':
+              result = await tamsubSubtitlesSrt(fileBuffer, filename, { language: input.language });
+              break;
+            case 'DEWATERMARK':
+              result = await tamsubDewatermark(fileBuffer, filename);
+              break;
+            default:
+              // Unreachable given the zod enum above — satisfies TS definite-assignment.
+              throw new Error(`Unsupported operation: ${input.operation}`);
+          }
         }
 
         // ---- UPLOADING (skip for text/SRT results — small, returned inline) ----
@@ -167,7 +245,7 @@ export async function POST(request: Request) {
         await supabase.from('editor_jobs').update({ status: 'FAILED', error: err?.message ?? 'unknown error' }).eq('id', job.id);
 
         let message = 'เกิดข้อผิดพลาดระหว่างประมวลผล';
-        if (err instanceof SourceImportError || err instanceof TamsubError) {
+        if (err instanceof SourceImportError || err instanceof TamsubError || err instanceof MediaProcessingError || err instanceof AIProviderError) {
           message = err.message;
         } else if (err?.message) {
           message = err.message;

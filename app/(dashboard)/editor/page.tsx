@@ -20,6 +20,10 @@ export default async function EditorPage() {
           ตัดช่วงเงียบ / เบิร์นซับลงคลิป / ถอด SRT / ลบลายน้ำ AI — ประมวลผลผ่าน Tamsub วางลิงก์ Google Drive หรือ URL วิดีโอโดยตรง
           (ไม่รองรับอัปโหลดไฟล์ตรงจากเครื่อง เพราะข้อจำกัดขนาดไฟล์ของเซิร์ฟเวอร์)
         </p>
+        <p className="text-gray-500 mt-1">
+          &quot;SRT แบบ Punchy&quot; ไม่ผ่าน Tamsub — ถอดเสียงด้วย Whisper (เวลาจริงต่อคำ) แล้วให้ AI แบ่งเป็นซับสั้นๆ ตามกฎภาษาไทยที่กำหนด
+          (ไม่ตัดคำเฉลี่ยเวลา, รวมคำเชื่อมกับคำหลัก, ไม่เว้นวรรคทุกคำ) เหมาะเอาไฟล์ .srt ไปนำเข้า CapCut เอง
+        </p>
       </div>
       <EditorClient products={products ?? []} recentJobs={recentJobs ?? []} />
     </div>

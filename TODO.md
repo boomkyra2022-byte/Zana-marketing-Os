@@ -58,7 +58,17 @@ Legend: [x] done+verified · [~] coded, not yet run/verified · [ ] not started
 - [~] `/editor` page + `editor-client.tsx` — operation selector, source input, per-op tuning fields, billing notice, result preview (video or SRT text), "use result as next source" chaining button, job history table
 - [~] Nav item added (`components/nav-items.ts`, 8→9 items — Editor is a daily-use tool, unlike admin-only Team which stayed a Settings sub-page)
 - [~] `.env.example` — added `TAMSUB_API_TOKEN`
-- [ ] Run migration 0006 on Supabase, set `TAMSUB_API_TOKEN`, smoke test all 4 operations end-to-end, commit + push + deploy
+- [x] Run migration 0006 on Supabase, set `TAMSUB_API_TOKEN`, smoke test all 4 operations end-to-end, commit + push + deploy — confirmed live in production (Editor nav item visible, deploy `615fa41` Ready)
+
+## Punchy SRT (added beyond MASTER_PROMPT_V2 scope, follow-up to Editor tool)
+User's actual goal for the CapCut request: a downloadable .srt with strict Thai captioning rules (no average-time word split, short connector words merged into neighboring cue, no space between every Thai word, proper-noun/English correction, full timing coverage, plain text no HTML) to import into CapCut manually. Direct CapCut draft-JSON generation was explicitly descoped as high-risk (undocumented format, resource_id/effect_id tied to CapCut's own asset catalog) — user agreed to start with the achievable part only.
+- [~] `supabase/migrations/0007_punchy_srt_operation.sql` — widen `editor_jobs.operation` check constraint to add `PUNCHY_SRT`
+- [~] `lib/ai/openai.ts` — `transcribeAudioWithTimestamps()` (whisper-1, verbose_json, word-level timestamps — real per-word times, never averaged)
+- [~] `prompts/punchy-subtitle.ts` — cue-grouping prompt; AI only picks word-index boundaries, never invents timestamps
+- [~] `lib/media/srt.ts` — resolves word indices → real timestamps, repairs any gap/overlap the model leaves (guarantees full coverage), formats plain-text `.srt`
+- [~] `app/api/tools/editor/run/route.ts` — new `PUNCHY_SRT` branch (`runPunchySubtitle` helper): extract audio → Whisper word timestamps → GPT cue grouping → validated SRT. Bypasses Tamsub entirely for this operation.
+- [~] `components/editor-client.tsx` / `editor/page.tsx` — added as 5th operation option, billing note clarifies no Tamsub credit used
+- [ ] Run migration 0007, smoke test with a real Thai video, commit + push + deploy
 
 ## Phase 5 — QA / Deploy
 - [ ] Security: server-side keys only, RLS review, signed/private storage, Drive URL validation, filename sanitization, file size limits, timeouts, AI rate limits

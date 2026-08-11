@@ -7,19 +7,24 @@ interface Props {
   recentJobs: { id: string; operation: string; status: string; result_kind: string | null; created_at: string; error: string | null }[];
 }
 
-type Operation = 'SILENCE_CUT' | 'RENDER' | 'SUBTITLE_SRT' | 'DEWATERMARK';
+type Operation = 'SILENCE_CUT' | 'RENDER' | 'SUBTITLE_SRT' | 'DEWATERMARK' | 'PUNCHY_SRT';
 
 const OPERATIONS: { value: Operation; label: string; billing: string }[] = [
   { value: 'SILENCE_CUT', label: 'ตัดช่วงเงียบ (Silence-cut)', billing: 'ฟรีสำหรับแพ็กเกจที่เสียเงินของ Tamsub' },
   { value: 'RENDER', label: 'ใส่ซับ / เบิร์นข้อความลงคลิป (Render)', billing: 'หัก 1 เครดิต (clip) ต่อการ render สำเร็จ 1 ครั้ง' },
-  { value: 'SUBTITLE_SRT', label: 'ถอดเป็นไฟล์ SRT อย่างเดียว', billing: 'หัก 1 เครดิต (clip) ต่อไฟล์สำเร็จ 1 ครั้ง' },
+  { value: 'SUBTITLE_SRT', label: 'ถอดเป็นไฟล์ SRT อย่างเดียว (Tamsub)', billing: 'หัก 1 เครดิต (clip) ต่อไฟล์สำเร็จ 1 ครั้ง' },
+  {
+    value: 'PUNCHY_SRT',
+    label: 'SRT แบบ Punchy — คุมกฎเอง (แนะนำสำหรับ CapCut)',
+    billing: 'ไม่ผ่าน Tamsub เลย ใช้ OpenAI ของเราเอง — ไม่หัก credit ของ Tamsub'
+  },
   { value: 'DEWATERMARK', label: 'ลบลายน้ำ AI (Dewatermark)', billing: 'ฟรีสำหรับแพ็กเกจที่เสียเงินของ Tamsub' }
 ];
 
 const STATUS_LABELS: Record<string, string> = {
   PENDING: 'กำลังเริ่มต้น...',
   DOWNLOADING: 'กำลังดาวน์โหลดวิดีโอต้นทาง...',
-  PROCESSING: 'กำลังส่งให้ Tamsub ประมวลผล...',
+  PROCESSING: 'กำลังประมวลผล...',
   UPLOADING: 'กำลังอัปโหลดผลลัพธ์...',
   DONE: 'เสร็จสิ้น',
   FAILED: 'ล้มเหลว'
