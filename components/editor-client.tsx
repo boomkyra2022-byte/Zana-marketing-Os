@@ -5,6 +5,24 @@ import { createClient } from '@/lib/supabase/client';
 
 const MAX_UPLOAD_BYTES = 300 * 1024 * 1024; // matches server-side MAX_BYTES_DEFAULT
 const ALLOWED_UPLOAD_TYPES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'];
+const EXT_BY_TYPE: Record<string, string> = {
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'video/webm': 'webm',
+  'video/x-matroska': 'mkv'
+};
+
+// Supabase Storage rejects object keys with non-ASCII characters (Thai
+// filenames, em-dashes, spaces, etc. — confirmed via a real "Invalid key"
+// error on a Thai-named .mp4). Build the storage key from only safe ASCII
+// (timestamp + short random id + extension derived from MIME type, not the
+// original filename) — the real filename is kept separately just for
+// display in the UI.
+function safeUploadPath(userId: string, file: File): string {
+  const ext = EXT_BY_TYPE[file.type] ?? 'mp4';
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `${userId}/${Date.now()}_${rand}.${ext}`;
+}
 
 interface Props {
   products: { id: string; product_name: string; brand: string }[];
@@ -156,7 +174,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
       } = await supabaseBrowser.auth.getUser();
       if (!user) throw new Error('เซสชันหมดอายุ กรุณา login ใหม่');
 
-      const path = `${user.id}/${Date.now()}_${file.name}`;
+      const path = safeUploadPath(user.id, file);
       const { error: uploadErr } = await supabaseBrowser.storage.from('source-uploads').upload(path, file, {
         contentType: file.type,
         upsert: false
