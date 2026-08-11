@@ -39,10 +39,17 @@ const punchyCuesSchema = z.object({
   cues: z.array(
     z.object({
       start_word_index: z.number().int().min(0),
-      end_word_index: z.number().int().min(0),
-      text: z.string()
+      end_word_index: z.number().int().min(0)
     })
-  )
+  ),
+  corrections: z
+    .array(
+      z.object({
+        word_index: z.number().int().min(0),
+        corrected_word: z.string()
+      })
+    )
+    .optional()
 });
 
 async function runPunchySubtitle(
@@ -79,6 +86,7 @@ async function runPunchySubtitle(
     const { text: aiText } = await callOpenAIJSON({ system, user: userPrompt, temperature: 0.2, timeoutMs: 120000 });
 
     let rawCues: RawCue[];
+    let corrections: { word_index: number; corrected_word: string }[];
     try {
       const parsedJson = JSON.parse(aiText);
       const validated = punchyCuesSchema.safeParse(parsedJson);
@@ -86,12 +94,13 @@ async function runPunchySubtitle(
         throw new Error(`AI response did not match expected schema: ${JSON.stringify(validated.error.flatten())}`);
       }
       rawCues = validated.data.cues;
+      corrections = validated.data.corrections ?? [];
     } catch (err: any) {
       throw new AIProviderError(err.message || 'AI response was not valid JSON', 502);
     }
 
     const repaired = repairCueCoverage(words, rawCues);
-    const timedCues = resolveCueTimestamps(words, repaired);
+    const timedCues = resolveCueTimestamps(words, repaired, corrections);
     if (timedCues.length === 0) {
       throw new AIProviderError('สร้าง subtitle ไม่สำเร็จ — AI ไม่ได้คืนค่า cue ที่ใช้ได้', 502);
     }
