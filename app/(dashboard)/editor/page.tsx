@@ -17,8 +17,8 @@ export default async function EditorPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Editor</h1>
         <p className="text-gray-500">
-          ตัดช่วงเงียบ / เบิร์นซับลงคลิป / ถอด SRT / ลบลายน้ำ AI — ประมวลผลผ่าน Tamsub วางลิงก์ Google Drive หรือ URL วิดีโอโดยตรง
-          (ไม่รองรับอัปโหลดไฟล์ตรงจากเครื่อง เพราะข้อจำกัดขนาดไฟล์ของเซิร์ฟเวอร์)
+          ตัดช่วงเงียบ / เบิร์นซับลงคลิป / ถอด SRT / ลบลายน้ำ AI — วางลิงก์ Google Drive, URL วิดีโอโดยตรง หรืออัปโหลดไฟล์จากเครื่องได้เลย
+          (ไฟล์อัปโหลดตรงไปที่ Storage ไม่ผ่านเซิร์ฟเวอร์ API เลยไม่ติด limit ขนาดไฟล์)
         </p>
         <p className="text-gray-500 mt-1">
           &quot;SRT แบบ Punchy&quot; ไม่ผ่าน Tamsub — ถอดเสียงด้วย Whisper (เวลาจริงต่อคำ) แล้วให้ AI แบ่งเป็นซับสั้นๆ ตามกฎภาษาไทยที่กำหนด

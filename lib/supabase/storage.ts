@@ -47,3 +47,25 @@ export async function resignEditedClip(path: string): Promise<string> {
   }
   return data.signedUrl;
 }
+
+// --- Direct-from-device upload support ---
+// The browser uploads raw video bytes straight to the "source-uploads"
+// bucket itself (RLS-scoped to the user's own uid folder, see
+// 0008_source_uploads_bucket.sql) — never through a Vercel Function, so the
+// 4.5MB request-body limit never applies. This helper just signs the
+// resulting object so the Editor run route can download it like any other
+// source_url.
+const SOURCE_UPLOADS_BUCKET = 'source-uploads';
+const SOURCE_SIGNED_URL_TTL_SEC = 60 * 60; // 1h — only needs to live long enough for the run route to download it
+
+export async function signSourceUpload(userId: string, path: string): Promise<string> {
+  if (!path.startsWith(`${userId}/`)) {
+    throw new Error('ไม่มีสิทธิ์เข้าถึงไฟล์นี้');
+  }
+  const serviceClient = createServiceRoleClient();
+  const { data, error } = await serviceClient.storage.from(SOURCE_UPLOADS_BUCKET).createSignedUrl(path, SOURCE_SIGNED_URL_TTL_SEC);
+  if (error || !data?.signedUrl) {
+    throw new Error(`สร้างลิงก์สำหรับไฟล์ที่อัปโหลดไม่สำเร็จ: ${error?.message || 'unknown error'}`);
+  }
+  return data.signedUrl;
+}

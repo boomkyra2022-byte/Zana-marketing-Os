@@ -1,6 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ChangeEvent } from 'react';
+import { createClient } from '@/lib/supabase/client';
+
+const MAX_UPLOAD_BYTES = 300 * 1024 * 1024; // matches server-side MAX_BYTES_DEFAULT
+const ALLOWED_UPLOAD_TYPES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'];
 
 interface Props {
   products: { id: string; product_name: string; brand: string }[];
@@ -42,6 +46,10 @@ const STATUS_BADGE: Record<string, string> = {
 export default function EditorClient({ products, recentJobs }: Props) {
   const [operation, setOperation] = useState<Operation>('SILENCE_CUT');
   const [sourceUrl, setSourceUrl] = useState('');
+  const [sourceMode, setSourceMode] = useState<'link' | 'upload'>('link');
+  const [uploadFileName, setUploadFileName] = useState('');
+  const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'signing' | 'done' | 'error'>('idle');
+  const [uploadError, setUploadError] = useState('');
   const [productId, setProductId] = useState('');
   const [templateId, setTemplateId] = useState('');
   const [language, setLanguage] = useState('th');
@@ -112,6 +120,66 @@ export default function EditorClient({ products, recentJobs }: Props) {
     }
   }
 
+  function switchSourceMode(mode: 'link' | 'upload') {
+    setSourceMode(mode);
+    setSourceUrl('');
+    setUploadFileName('');
+    setUploadState('idle');
+    setUploadError('');
+  }
+
+  async function handleFileSelected(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file later
+    if (!file) return;
+
+    if (!ALLOWED_UPLOAD_TYPES.includes(file.type)) {
+      setUploadState('error');
+      setUploadError(`ไม่รองรับไฟล์ประเภทนี้ (${file.type || 'ไม่ทราบชนิด'}) — รองรับเฉพาะ MP4 / MOV / WEBM`);
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadState('error');
+      setUploadError(`ไฟล์ใหญ่เกินกำหนด (${(file.size / 1024 / 1024).toFixed(0)}MB) — จำกัดไว้ที่ ${(MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0)}MB`);
+      return;
+    }
+
+    setUploadFileName(file.name);
+    setUploadError('');
+    setUploadState('uploading');
+    setSourceUrl('');
+
+    try {
+      const supabaseBrowser = createClient();
+      const {
+        data: { user }
+      } = await supabaseBrowser.auth.getUser();
+      if (!user) throw new Error('เซสชันหมดอายุ กรุณา login ใหม่');
+
+      const path = `${user.id}/${Date.now()}_${file.name}`;
+      const { error: uploadErr } = await supabaseBrowser.storage.from('source-uploads').upload(path, file, {
+        contentType: file.type,
+        upsert: false
+      });
+      if (uploadErr) throw new Error(`อัปโหลดไฟล์ไม่สำเร็จ: ${uploadErr.message}`);
+
+      setUploadState('signing');
+      const res = await fetch('/api/tools/editor/uploads/sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path })
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'สร้างลิงก์ไฟล์ไม่สำเร็จ');
+
+      setSourceUrl(json.signed_url);
+      setUploadState('done');
+    } catch (err: any) {
+      setUploadState('error');
+      setUploadError(err.message || 'อัปโหลดไฟล์ไม่สำเร็จ');
+    }
+  }
+
   function useResultAsNextSource() {
     if (result?.kind === 'VIDEO' && result.signed_url) {
       setSourceUrl(result.signed_url);
@@ -149,15 +217,48 @@ export default function EditorClient({ products, recentJobs }: Props) {
         </div>
 
         <div>
-          <label className="field-label">Source Video — Google Drive link หรือ URL วิดีโอโดยตรง *</label>
-          <input
-            value={sourceUrl}
-            onChange={(e) => setSourceUrl(e.target.value)}
-            placeholder="https://drive.google.com/file/d/... หรือ https://..."
-          />
-          <p className="text-xs text-gray-500 mt-1">
-            เชื่อมผลลัพธ์จากขั้นตอนก่อนหน้าต่อกันได้ — กด &quot;ใช้ผลลัพธ์นี้เป็น Source ต่อ&quot; ด้านล่างหลังรันเสร็จ
-          </p>
+          <label className="field-label">Source Video *</label>
+          <div className="flex gap-2 mb-2">
+            <button
+              type="button"
+              className={sourceMode === 'link' ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => switchSourceMode('link')}
+            >
+              วางลิงก์
+            </button>
+            <button
+              type="button"
+              className={sourceMode === 'upload' ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => switchSourceMode('upload')}
+            >
+              อัปโหลดไฟล์จากเครื่อง
+            </button>
+          </div>
+
+          {sourceMode === 'link' ? (
+            <>
+              <input
+                value={sourceUrl}
+                onChange={(e) => setSourceUrl(e.target.value)}
+                placeholder="https://drive.google.com/file/d/... หรือ https://..."
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                เชื่อมผลลัพธ์จากขั้นตอนก่อนหน้าต่อกันได้ — กด &quot;ใช้ผลลัพธ์นี้เป็น Source ต่อ&quot; ด้านล่างหลังรันเสร็จ
+              </p>
+            </>
+          ) : (
+            <>
+              <input type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska" onChange={handleFileSelected} />
+              <p className="text-xs text-gray-500 mt-1">
+                ไฟล์อัปโหลดตรงไปที่ Storage ของเราเลย ไม่ผ่านเซิร์ฟเวอร์ API เลยไม่ติด limit ขนาดไฟล์ 4.5MB — รองรับสูงสุด{' '}
+                {(MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0)}MB
+              </p>
+              {uploadState === 'uploading' && <p className="text-xs text-accentBlue mt-1">กำลังอัปโหลด &quot;{uploadFileName}&quot;...</p>}
+              {uploadState === 'signing' && <p className="text-xs text-accentBlue mt-1">กำลังเตรียมไฟล์...</p>}
+              {uploadState === 'done' && <p className="text-xs text-accentGreen mt-1">✓ &quot;{uploadFileName}&quot; พร้อมใช้งาน</p>}
+              {uploadState === 'error' && <p className="text-xs text-red-600 mt-1">{uploadError}</p>}
+            </>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
