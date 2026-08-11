@@ -69,6 +69,7 @@ User's actual goal for the CapCut request: a downloadable .srt with strict Thai 
 - [~] `app/api/tools/editor/run/route.ts` — new `PUNCHY_SRT` branch (`runPunchySubtitle` helper): extract audio → Whisper word timestamps → GPT cue grouping → validated SRT. Bypasses Tamsub entirely for this operation.
 - [~] `components/editor-client.tsx` / `editor/page.tsx` — added as 5th operation option, billing note clarifies no Tamsub credit used
 - [ ] Run migration 0007, smoke test with a real Thai video, commit + push + deploy
+- [x] Fixed `lib/media/drive.ts` while testing: large-file Google Drive downloads were looping back to the "can't scan for viruses" HTML interstitial even with correct "Anyone with the link" sharing, because (a) Google's current large-file bypass needs the interstitial's `uuid` replayed against `drive.usercontent.google.com`, not just the older `confirm=TOKEN` param, and (b) the interstitial sets a cookie that must be forwarded on the follow-up request or Drive re-serves the warning page. Added uuid-based bypass + cookie forwarding + a `confirm=t` last-resort fallback (2 attempts before failing with a clear Thai message). This also fixes the same underlying flow used by Video Analyzer's Drive import.
 
 ## Phase 5 — QA / Deploy
 - [ ] Security: server-side keys only, RLS review, signed/private storage, Drive URL validation, filename sanitization, file size limits, timeouts, AI rate limits

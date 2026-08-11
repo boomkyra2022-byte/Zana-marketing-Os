@@ -35,6 +35,31 @@ function extractConfirmToken(html: string): string | null {
   return m2?.[1] ?? null;
 }
 
+// Google's newer large-file "can't scan for viruses" interstitial embeds a
+// per-request uuid that the actual download must be replayed with against
+// drive.usercontent.google.com — the older uc?export=download&confirm=TOKEN
+// form alone increasingly just loops back to the same interstitial.
+function extractUuid(html: string): string | null {
+  const m = html.match(/name="uuid"\s+value="([0-9A-Za-z_-]+)"/);
+  return m?.[1] ?? null;
+}
+
+// The interstitial page also sets a cookie that Google checks on the
+// follow-up confirm request — without forwarding it, Drive can serve the
+// warning page again indefinitely even with a valid confirm token/uuid.
+function readSetCookies(res: Response): string[] {
+  const getSetCookie = (res.headers as any).getSetCookie;
+  if (typeof getSetCookie === 'function') return getSetCookie.call(res.headers);
+  const single = res.headers.get('set-cookie');
+  return single ? [single] : [];
+}
+
+function mergeCookies(existing: string | undefined, res: Response): string | undefined {
+  const fresh = readSetCookies(res).map((c) => c.split(';')[0]);
+  if (fresh.length === 0) return existing;
+  return [existing, ...fresh].filter(Boolean).join('; ');
+}
+
 export async function downloadDriveFile(
   fileId: string,
   destPath: string,
@@ -42,6 +67,7 @@ export async function downloadDriveFile(
 ): Promise<{ mimeType: string | null; bytes: number }> {
   const maxBytes = opts.maxBytes ?? MAX_BYTES_DEFAULT;
   let url = `https://drive.google.com/uc?export=download&id=${fileId}`;
+  let cookieHeader: string | undefined;
 
   let res = await fetch(url, { redirect: 'follow' });
   if (res.status === 404) {
@@ -50,21 +76,41 @@ export async function downloadDriveFile(
   if (res.status === 403) {
     throw new DriveImportError('ไม่มีสิทธิ์เข้าถึงไฟล์นี้ — ตั้งค่าแชร์เป็น "Anyone with the link" แล้วลองใหม่', 'permission_denied');
   }
+  cookieHeader = mergeCookies(cookieHeader, res);
 
-  const contentType = res.headers.get('content-type') ?? '';
+  let contentType = res.headers.get('content-type') ?? '';
 
-  // Large files: Google serves an HTML "can't scan for viruses" confirm page instead of the file.
-  if (contentType.includes('text/html')) {
+  // Large files: Google serves an HTML "can't scan for viruses" confirm page
+  // instead of the file. Try up to 2 bypass attempts (uuid-based
+  // usercontent.google.com flow, then a direct confirm=t fallback) since
+  // Google has changed this flow's exact shape more than once.
+  let attempts = 0;
+  while (contentType.includes('text/html') && attempts < 2) {
+    attempts += 1;
     const html = await res.text();
+    const uuid = extractUuid(html);
     const token = extractConfirmToken(html);
-    if (!token) {
+
+    if (uuid) {
+      url = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t&uuid=${uuid}`;
+    } else if (token) {
+      url = `https://drive.google.com/uc?export=download&confirm=${token}&id=${fileId}`;
+    } else if (attempts === 1) {
       if (html.includes('accessDenied') || html.includes('ต้องขออนุญาต') || html.includes('permission')) {
         throw new DriveImportError('ไม่มีสิทธิ์เข้าถึงไฟล์นี้ — ตั้งค่าแชร์เป็น "Anyone with the link" แล้วลองใหม่', 'permission_denied');
       }
-      throw new DriveImportError('ดาวน์โหลดไฟล์จาก Google Drive ไม่สำเร็จ — ลองตรวจสอบลิงก์อีกครั้ง', 'download_failed');
+      // Last-resort bypass attempt even with no token/uuid found.
+      url = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`;
+    } else {
+      throw new DriveImportError(
+        'ไฟล์นี้อาจใหญ่เกินกว่า Google Drive จะให้ดาวน์โหลดสาธารณะได้ (ติด virus-scan warning) — ลองลดขนาดไฟล์ หรืออัปโหลดไปที่ storage อื่นที่มีลิงก์ดาวน์โหลดตรง',
+        'download_failed'
+      );
     }
-    url = `https://drive.google.com/uc?export=download&confirm=${token}&id=${fileId}`;
-    res = await fetch(url, { redirect: 'follow' });
+
+    res = await fetch(url, { redirect: 'follow', headers: cookieHeader ? { Cookie: cookieHeader } : undefined });
+    cookieHeader = mergeCookies(cookieHeader, res);
+    contentType = res.headers.get('content-type') ?? '';
   }
 
   if (!res.ok || !res.body) {
