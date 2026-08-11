@@ -122,6 +122,72 @@ export async function extractFrames(filePath: string, plan: FramePlan[], tmpDir:
   return results;
 }
 
+export interface DelogoRegion {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+// Local, Tamsub-free fallback for watermark removal (added when a Tamsub
+// account didn't have dewatermark on its plan — "เราทำเองได้ไหม"). Honest
+// limitation, told to the user in the UI: this is ffmpeg's `delogo` filter,
+// which interpolates the region from its surrounding pixels — it blurs/
+// erases a fixed box, it does NOT do AI content-aware reconstruction like a
+// proper video-inpainting model would. Works reasonably well for a small
+// static corner watermark (which is what AI-video-generator watermarks
+// like Veo/Gemini's usually are) against a fairly simple background; not a
+// substitute for Tamsub's AI dewatermark on busy/detailed footage.
+export async function applyDelogo(filePath: string, destPath: string, region: DelogoRegion): Promise<void> {
+  if (!ffmpegPath) throw new MediaProcessingError('ไม่พบ ffmpeg บนเซิร์ฟเวอร์', 'dewatermark');
+  ensureExecutable(ffmpegPath);
+  try {
+    await execFileAsync(
+      ffmpegPath,
+      [
+        '-y',
+        '-i', filePath,
+        '-vf', `delogo=x=${Math.round(region.x)}:y=${Math.round(region.y)}:w=${Math.round(region.w)}:h=${Math.round(region.h)}:show=0`,
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-crf', '20',
+        '-c:a', 'copy',
+        destPath
+      ],
+      { maxBuffer: 1024 * 1024 * 50, timeout: 250000 }
+    );
+  } catch (err: any) {
+    console.error('[delogo] failed:', err?.message, err?.stderr?.slice?.(0, 1000) || '');
+    throw new MediaProcessingError('ลบลายน้ำไม่สำเร็จ — ไฟล์อาจเสียหายหรือประมวลผลนานเกินไป', 'dewatermark');
+  }
+}
+
+export type WatermarkCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+
+// small/medium/large as a fraction of frame width/height — tuned for a
+// typical AI-video-generator corner watermark (logo + small text), not a
+// full-width banner.
+const WATERMARK_SIZE_PCT: Record<'small' | 'medium' | 'large', number> = {
+  small: 0.12,
+  medium: 0.18,
+  large: 0.25
+};
+
+export function computeDelogoRegion(
+  width: number,
+  height: number,
+  corner: WatermarkCorner,
+  size: 'small' | 'medium' | 'large'
+): DelogoRegion {
+  const pct = WATERMARK_SIZE_PCT[size] ?? WATERMARK_SIZE_PCT.medium;
+  const margin = Math.round(width * 0.02);
+  const w = Math.round(width * pct);
+  const h = Math.round(height * pct);
+  const x = corner.endsWith('right') ? width - w - margin : margin;
+  const y = corner.startsWith('bottom') ? height - h - margin : margin;
+  return { x: Math.max(0, x), y: Math.max(0, y), w, h };
+}
+
 // Re-exported from fs-utils (not redefined here) so callers that only need
 // cleanup — like the Tamsub-backed Editor route — can import it without
 // pulling ffmpeg-static/ffprobe-static into their function bundle.

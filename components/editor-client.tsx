@@ -29,7 +29,7 @@ interface Props {
   recentJobs: { id: string; operation: string; status: string; result_kind: string | null; created_at: string; error: string | null }[];
 }
 
-type Operation = 'SILENCE_CUT' | 'RENDER' | 'SUBTITLE_SRT' | 'DEWATERMARK' | 'PUNCHY_SRT';
+type Operation = 'SILENCE_CUT' | 'RENDER' | 'SUBTITLE_SRT' | 'DEWATERMARK' | 'PUNCHY_SRT' | 'DEWATERMARK_LOCAL';
 
 const OPERATIONS: { value: Operation; label: string; billing: string }[] = [
   { value: 'SILENCE_CUT', label: 'ตัดช่วงเงียบ (Silence-cut)', billing: 'ฟรีสำหรับแพ็กเกจที่เสียเงินของ Tamsub' },
@@ -40,7 +40,25 @@ const OPERATIONS: { value: Operation; label: string; billing: string }[] = [
     label: 'SRT แบบ Punchy — คุมกฎเอง (แนะนำสำหรับ CapCut)',
     billing: 'ไม่ผ่าน Tamsub เลย ใช้ OpenAI ของเราเอง — ไม่หัก credit ของ Tamsub'
   },
-  { value: 'DEWATERMARK', label: 'ลบลายน้ำ AI (Dewatermark)', billing: 'ฟรีสำหรับแพ็กเกจที่เสียเงินของ Tamsub' }
+  { value: 'DEWATERMARK', label: 'ลบลายน้ำ AI (Dewatermark — Tamsub)', billing: 'ต้องมีสิทธิ์ฟีเจอร์นี้ในแพ็กเกจ Tamsub' },
+  {
+    value: 'DEWATERMARK_LOCAL',
+    label: 'ลบลายน้ำ — แบบไม่ใช้ Tamsub (เบลอมุม)',
+    billing: 'ไม่ผ่าน Tamsub เลย ประมวลผลในเซิร์ฟเวอร์เราเอง ไม่มีค่าใช้จ่ายเพิ่ม'
+  }
+];
+
+const WATERMARK_CORNERS: { value: string; label: string }[] = [
+  { value: 'bottom-right', label: 'ล่างขวา' },
+  { value: 'bottom-left', label: 'ล่างซ้าย' },
+  { value: 'top-right', label: 'บนขวา' },
+  { value: 'top-left', label: 'บนซ้าย' }
+];
+
+const WATERMARK_SIZES: { value: string; label: string }[] = [
+  { value: 'small', label: 'เล็ก' },
+  { value: 'medium', label: 'กลาง' },
+  { value: 'large', label: 'ใหญ่' }
 ];
 
 const STATUS_LABELS: Record<string, string> = {
@@ -73,6 +91,8 @@ export default function EditorClient({ products, recentJobs }: Props) {
   const [language, setLanguage] = useState('th');
   const [thresholdDb, setThresholdDb] = useState<number | ''>('');
   const [minSilenceMs, setMinSilenceMs] = useState<number | ''>('');
+  const [watermarkCorner, setWatermarkCorner] = useState('bottom-right');
+  const [watermarkSize, setWatermarkSize] = useState('medium');
 
   const [phase, setPhase] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [progressStatus, setProgressStatus] = useState('');
@@ -98,7 +118,9 @@ export default function EditorClient({ products, recentJobs }: Props) {
           template_id: templateId || undefined,
           language: language || undefined,
           threshold_db: thresholdDb === '' ? undefined : thresholdDb,
-          min_silence_ms: minSilenceMs === '' ? undefined : minSilenceMs
+          min_silence_ms: minSilenceMs === '' ? undefined : minSilenceMs,
+          watermark_corner: watermarkCorner || undefined,
+          watermark_size: watermarkSize || undefined
         })
       });
 
@@ -328,6 +350,35 @@ export default function EditorClient({ products, recentJobs }: Props) {
                   onChange={(e) => setMinSilenceMs(e.target.value === '' ? '' : Number(e.target.value))}
                   placeholder="500"
                 />
+              </div>
+            </>
+          )}
+
+          {operation === 'DEWATERMARK_LOCAL' && (
+            <>
+              <div>
+                <label className="field-label">ตำแหน่งลายน้ำ</label>
+                <select value={watermarkCorner} onChange={(e) => setWatermarkCorner(e.target.value)}>
+                  {WATERMARK_CORNERS.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="field-label">ขนาดพื้นที่เบลอ</label>
+                <select value={watermarkSize} onChange={(e) => setWatermarkSize(e.target.value)}>
+                  {WATERMARK_SIZES.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-span-2 text-xs text-gray-500 bg-surface rounded-lg p-3">
+                ⚠ วิธีนี้คือ <strong>เบลอ/ลบล้างพื้นที่มุมนั้นออก</strong> ไม่ใช่ AI สร้างภาพใต้ลายน้ำขึ้นใหม่แบบ Tamsub — เหมาะกับลายน้ำแบบโลโก้เล็กมุมนิ่งๆ
+                (เช่น Veo/Gemini) บนพื้นหลังไม่ซับซ้อน ถ้าตำแหน่งลายน้ำทับเนื้อหาสำคัญ ผลลัพธ์อาจดูเบลอในจุดนั้นชัดเจน
               </div>
             </>
           )}

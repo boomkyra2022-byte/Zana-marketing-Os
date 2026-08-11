@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '@/lib/supabase/server';
 import { downloadSourceVideo, SourceImportError } from '@/lib/media/source';
 import { cleanupFiles } from '@/lib/media/fs-utils';
-import { extractAudio, probeMetadata, MediaProcessingError } from '@/lib/media/ffmpeg';
+import { extractAudio, probeMetadata, applyDelogo, computeDelogoRegion, MediaProcessingError, type WatermarkCorner } from '@/lib/media/ffmpeg';
 import { uploadEditedClip } from '@/lib/supabase/storage';
 import { tamsubSilenceCut, tamsubRender, tamsubSubtitlesSrt, tamsubDewatermark, TamsubError, type TamsubResult } from '@/lib/tamsub/client';
 import { transcribeAudioWithTimestamps, callOpenAIJSON, AIProviderError } from '@/lib/ai/openai';
@@ -26,13 +26,15 @@ export const maxDuration = 300;
 const MAX_BYTES_DEFAULT = 300 * 1024 * 1024;
 
 const requestSchema = z.object({
-  operation: z.enum(['SILENCE_CUT', 'RENDER', 'SUBTITLE_SRT', 'DEWATERMARK', 'PUNCHY_SRT']),
+  operation: z.enum(['SILENCE_CUT', 'RENDER', 'SUBTITLE_SRT', 'DEWATERMARK', 'PUNCHY_SRT', 'DEWATERMARK_LOCAL']),
   source_url: z.string().min(1),
   product_id: z.string().uuid().nullable().optional(),
   template_id: z.string().optional(),
   language: z.string().optional(),
   threshold_db: z.number().optional(),
-  min_silence_ms: z.number().optional()
+  min_silence_ms: z.number().optional(),
+  watermark_corner: z.enum(['top-left', 'top-right', 'bottom-left', 'bottom-right']).optional(),
+  watermark_size: z.enum(['small', 'medium', 'large']).optional()
 });
 
 const punchyCuesSchema = z.object({
@@ -111,6 +113,27 @@ async function runPunchySubtitle(
   }
 }
 
+async function runLocalDewatermark(
+  sourcePath: string,
+  runId: string,
+  tmpDir: string,
+  corner: WatermarkCorner,
+  size: 'small' | 'medium' | 'large'
+): Promise<{ buffer: Buffer; contentType: string }> {
+  const outputPath = path.join(tmpDir, `editor_${runId}_dewm.mp4`);
+  try {
+    const metadata = await probeMetadata(sourcePath);
+    if (!metadata.width || !metadata.height) {
+      throw new MediaProcessingError('อ่านขนาดวิดีโอไม่ได้ — ไม่สามารถคำนวณตำแหน่งลายน้ำได้', 'dewatermark');
+    }
+    const region = computeDelogoRegion(metadata.width, metadata.height, corner, size);
+    await applyDelogo(sourcePath, outputPath, region);
+    return { buffer: fs.readFileSync(outputPath), contentType: 'video/mp4' };
+  } finally {
+    cleanupFiles([outputPath]);
+  }
+}
+
 export async function POST(request: Request) {
   const supabase = createClient();
   const {
@@ -152,7 +175,9 @@ export async function POST(request: Request) {
           options: {
             language: input.language ?? null,
             threshold_db: input.threshold_db ?? null,
-            min_silence_ms: input.min_silence_ms ?? null
+            min_silence_ms: input.min_silence_ms ?? null,
+            watermark_corner: input.watermark_corner ?? null,
+            watermark_size: input.watermark_size ?? null
           },
           product_id: input.product_id ?? null,
           status: 'PENDING',
@@ -186,6 +211,15 @@ export async function POST(request: Request) {
         if (input.operation === 'PUNCHY_SRT') {
           const punchy = await runPunchySubtitle(sourcePath, runId, tmpDir, input.product_id ?? null, supabase);
           result = { kind: 'text', text: punchy.text, meta: { prompt_version: PROMPT_VERSION_PUNCHY_SUBTITLE } };
+        } else if (input.operation === 'DEWATERMARK_LOCAL') {
+          const dewm = await runLocalDewatermark(
+            sourcePath,
+            runId,
+            tmpDir,
+            input.watermark_corner ?? 'bottom-right',
+            input.watermark_size ?? 'medium'
+          );
+          result = { kind: 'binary', buffer: dewm.buffer, contentType: dewm.contentType, meta: { method: 'ffmpeg-delogo' } };
         } else {
           const fileBuffer = fs.readFileSync(sourcePath);
           switch (input.operation) {
