@@ -18,7 +18,7 @@
 //   2. buildMasterPromptSetPrompt — Generate all PARTs in one call (respects locked parts passed through as fixed context)
 //   3. buildRegeneratePartPrompt  — Regenerate a single PART only (Director Command surgical edits)
 
-export const PROMPT_VERSION_FLOW_DIRECTOR = 'flow-prompt-director-v1';
+export const PROMPT_VERSION_FLOW_DIRECTOR = 'flow-prompt-director-v2';
 
 export interface FlowStoryFlowStep {
   step: string;
@@ -82,6 +82,15 @@ const HOOK_LIBRARY = `Pattern Interrupt (ภาพ/การกระทำท�
 const BANNED_GENERIC_OPENERS = `"สวัสดีครับ/ค่ะ", "สวัสดีทุกคน", "วันนี้เราจะมาพูดถึง...", "วันนี้เราจะมาแนะนำ...", "hi guys", "hello everyone" หรือคำทักทาย/เกริ่นนำทั่วไปอื่นๆ ที่ไม่ใช่ Hook — ห้ามใช้เด็ดขาด เว้นแต่ผู้ใช้ระบุไว้ชัดเจนใน Content Input ว่าต้องการให้เปิดด้วยคำทักทาย`;
 
 const GUARDRAILS = `ห้ามเปลี่ยนตัวละครโดยไม่ได้รับคำสั่ง, ห้ามเปลี่ยนใบหน้า, ห้ามสร้าง Lip Sync ใหม่โดยไม่จำเป็น, ห้ามสร้างคำพูดที่ผู้พูดไม่ได้พูดหากเป็น Existing Footage, ห้ามสร้างยอดขายปลอม/รีวิวปลอม/ผลลัพธ์ปลอม, ห้ามสร้าง Claim เกินจริงหรือเกินกว่าที่ระบุใน key_claims_allowed, ห้ามพูดถึงสิ่งที่อยู่ใน banned_claims เด็ดขาด, ห้ามใช้ Dashboard จำลองแล้วทำให้เข้าใจว่าเป็นผลลัพธ์จริง, ห้ามบังหน้าผู้พูด, ห้ามใส่ Typography มากจนอ่านไม่ทัน, ห้ามใช้ Effect มากจนลดความน่าเชื่อถือ, ห้ามสร้างลายน้ำ, ห้ามขึ้นต้นด้วยคำทักทายทั่วไป (${BANNED_GENERIC_OPENERS})`;
+
+// Added after real user testing: first version let the model write however
+// much VO it felt like per PART, which often produced 3-4 seconds of speech
+// inside a 10-second PART — dead air for the rest. Google Flow needs a VO
+// script that occupies the full duration (or the AI generating the actual
+// video will invent its own filler, which breaks continuity/pacing
+// control). This rule is injected into both the full-set generator and the
+// single-part regenerator so every PART is held to the same pacing bar.
+const VOICE_OVER_PACING_RULE = `Voice Over ต้องเต็มความยาวของ PART นั้นๆ (~10 วินาที) ไม่เว้นความเงียบเกิน 1 วินาทีในจุดใดจุดหนึ่ง (ยกเว้นจงใจเว้นจังหวะสั้นๆ เพื่อ Retention/Dramatic pause ซึ่งต้องระบุเหตุผลใน retention_device) อัตราพูดภาษาไทยปกติอยู่ที่ประมาณ 2.5-3.5 คำต่อวินาที ดังนั้น PART ยาว 10 วินาทีควรมี Voice Over ประมาณ 25-35 คำ (ปรับตามจังหวะ hook/pause ที่ตั้งใจ) ถ้าเนื้อหาที่มีไม่พอพูดเต็มเวลา ให้ขยายด้วยการอธิบายเพิ่ม ยกตัวอย่างประกอบ ถามคำถามเชิงวาทศิลป์ หรือย้ำ/ตอกย้ำ benefit — ห้ามปล่อยให้ประโยคสั้นๆ แล้วเว้นที่เหลือเงียบเปล่า Voice Over ของแต่ละ scene ในหัวข้อ SCENE BREAKDOWN เมื่อนำมาเรียงต่อกันตามลำดับต้องเท่ากับ full_voice_over ของ PART นั้นเป๊ะๆ และครอบคลุมทุกวินาทีของ time_range ของแต่ละ scene ไม่มีช่วงที่ไม่มีเสียงพูดคั่นกลาง`;
 
 interface AnalysisCtx {
   contentInput: string;
@@ -211,7 +220,7 @@ function partTemplateInstructions(ctx: { aspectRatio: string }) {
 3. CHARACTER BIBLE — รูปลักษณ์ เสื้อผ้า น้ำเสียง กฎความต่อเนื่อง (คัดลอกมาจาก Continuity Bible ทุกครั้ง)
 4. VISUAL CONTINUITY — typography style, motion language, color treatment, editing energy (คัดลอกมาจาก Continuity Bible ทุกครั้ง)
 5. SCENE BREAKDOWN ของ PART นี้ (2-4 scene) แต่ละ scene ระบุ: TIME / PURPOSE / VISUAL / SUBJECT / ACTION / CAMERA / MOTION GRAPHIC / ON-SCREEN TEXT / VOICE OVER / SOUND / TRANSITION — ต้องเจาะจงเสมอ ห้ามเขียนคลุมเครือแบบ "เพิ่มโมชั่นกราฟิก" ต้องบอกว่าเป็นกราฟิกอะไร ปรากฏตอนไหน ทำหน้าที่อะไร
-6. FULL VOICE OVER ของ PART นี้ทั้งหมด (คำพูดจริงที่จะได้ยิน)
+6. FULL VOICE OVER ของ PART นี้ทั้งหมด (คำพูดจริงที่จะได้ยิน) — ${VOICE_OVER_PACING_RULE}
 7. ON-SCREEN TEXT ที่จะปรากฏจริงในวิดีโอช่วงนี้ (Small Header / Main Headline / Supporting / Keyword / CTA — เลือกเฉพาะที่เหมาะสม)
 8. RETENTION DEVICE ของ PART นี้ (Open Loop, Pattern Interrupt, Number, Before/After, Reveal, Contrast ฯลฯ)
 9. EDITING STYLE / PACING ของ PART นี้
@@ -299,7 +308,7 @@ OUTPUT FORMAT — ตอบเป็น JSON เท่านั้น ห้า�
       "scenes": [
         {"scene_number": number, "time_range": string, "purpose": string, "visual": string, "subject": string, "action": string, "camera": string, "motion_graphic": string, "on_screen_text": string, "voice_over": string, "sound": string, "transition": string}
       ],
-      "full_voice_over": string,
+      "full_voice_over": string (~25-35 คำ เต็มความยาว 10 วินาที ห้ามสั้นแค่ 1-2 ประโยคแล้วปล่อยเงียบ — ดูกฎ VOICE OVER PACING ด้านบน),
       "on_screen_text": string[],
       "editing_style": string,
       "retention_device": string,
@@ -374,7 +383,7 @@ OUTPUT FORMAT — ตอบเป็น JSON object เดียว (ไม่�
   "time_range": "${ctx.targetTimeRange}",
   "part_purpose": string,
   "scenes": [{"scene_number": number, "time_range": string, "purpose": string, "visual": string, "subject": string, "action": string, "camera": string, "motion_graphic": string, "on_screen_text": string, "voice_over": string, "sound": string, "transition": string}],
-  "full_voice_over": string,
+  "full_voice_over": string (~25-35 คำ เต็มความยาว 10 วินาที ห้ามสั้นแค่ 1-2 ประโยคแล้วปล่อยเงียบ — ดูกฎ VOICE OVER PACING ด้านบน),
   "on_screen_text": string[],
   "editing_style": string,
   "retention_device": string,
