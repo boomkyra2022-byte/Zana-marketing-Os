@@ -59,6 +59,7 @@ export type TamsubResult = TamsubBinaryResult | TamsubTextResult;
 
 async function callTamsub(
   endpoint: string,
+  fileFieldName: string,
   fileBuffer: Buffer,
   filename: string,
   fields: Record<string, string>
@@ -69,7 +70,15 @@ async function callTamsub(
   }
 
   const form = new FormData();
-  form.append('file', new Blob([new Uint8Array(fileBuffer)]), filename);
+  // Field name matters — Tamsub's real API (confirmed against their live
+  // /developers docs, 2026-08-19) expects "video" for renders/dewatermark/
+  // silence-cut and "media" for /v1/subtitles, NOT a generic "file". Using
+  // the wrong field name is indistinguishable from not uploading a video at
+  // all from Tamsub's side — this was the actual cause of a real production
+  // error: RENDER returned {"error":"pass \"srt\"/\"cues\" in payload, or
+  // upload a video to auto-transcribe"} because Tamsub genuinely never saw
+  // a video file (it was sitting under the wrong field name "file").
+  form.append(fileFieldName, new Blob([new Uint8Array(fileBuffer)]), filename);
   for (const [key, value] of Object.entries(fields)) {
     if (value !== undefined && value !== null && value !== '') form.append(key, value);
   }
@@ -126,38 +135,63 @@ async function callTamsub(
   return { kind: 'binary', buffer: buf, contentType: contentType || 'video/mp4' };
 }
 
+// Real /v1/silence-cut contract: field name "video", flat (non-JSON) form
+// fields "thresholdPct" (1-90, % of the clip's peak loudness, default 20),
+// "minGapSec" (0.1-2 seconds, default 0.1), "bridgeSec" (0-0.6, default 0).
+// The previous version of this function sent "threshold_db"/"min_silence_ms"
+// — field names Tamsub's real API doesn't recognize at all, so every
+// silence-cut request was silently falling back to Tamsub's own defaults
+// regardless of what the user configured.
 export async function tamsubSilenceCut(
   fileBuffer: Buffer,
   filename: string,
-  opts: { threshold_db?: number; min_silence_ms?: number } = {}
+  opts: { thresholdPct?: number; minGapSec?: number; bridgeSec?: number } = {}
 ): Promise<TamsubResult> {
-  return callTamsub('/v1/silence-cut', fileBuffer, filename, {
-    threshold_db: opts.threshold_db != null ? String(opts.threshold_db) : '',
-    min_silence_ms: opts.min_silence_ms != null ? String(opts.min_silence_ms) : ''
+  return callTamsub('/v1/silence-cut', 'video', fileBuffer, filename, {
+    thresholdPct: opts.thresholdPct != null ? String(opts.thresholdPct) : '',
+    minGapSec: opts.minGapSec != null ? String(opts.minGapSec) : '',
+    bridgeSec: opts.bridgeSec != null ? String(opts.bridgeSec) : ''
   });
 }
 
+// Real /v1/renders contract: field name "video" for the clip, and every
+// option (templateId, style, positionRegions, fps, maxWidth, source) goes
+// inside ONE form field called "payload" holding a JSON *string* — not as
+// individual flat form fields. There is no "language" parameter at all
+// (Tamsub auto-transcribes Thai-aware speech server-side); the previous
+// version sent flat "template"/"language" fields, which Tamsub's API
+// ignores entirely, and — critically — used the wrong file field name
+// ("file" instead of "video"), which is the actual root cause of the
+// {"error":"pass \"srt\"/\"cues\" in payload, or upload a video to
+// auto-transcribe"} error: Tamsub never received a video at all.
 export async function tamsubRender(
   fileBuffer: Buffer,
   filename: string,
-  opts: { template_id?: string; language?: string } = {}
+  opts: { templateId?: string; positionYPct?: number; useWalletCredit?: boolean } = {}
 ): Promise<TamsubResult> {
-  return callTamsub('/v1/renders', fileBuffer, filename, {
-    template: opts.template_id ?? '',
-    language: opts.language ?? 'th'
+  const payload: Record<string, unknown> = {};
+  if (opts.templateId) payload.templateId = opts.templateId;
+  if (opts.positionYPct != null) payload.style = { positionY: Math.max(0, Math.min(1, opts.positionYPct / 100)) };
+  if (opts.useWalletCredit) payload.source = 'wallet';
+
+  return callTamsub('/v1/renders', 'video', fileBuffer, filename, {
+    payload: Object.keys(payload).length > 0 ? JSON.stringify(payload) : ''
   });
 }
 
+// Real /v1/subtitles contract: field name "media" (not "file"), only other
+// optional field is the flat "source" ("auto" | "wallet"). No "language"
+// field — same auto-transcribe behavior as renders.
 export async function tamsubSubtitlesSrt(
   fileBuffer: Buffer,
   filename: string,
-  opts: { language?: string } = {}
+  opts: { useWalletCredit?: boolean } = {}
 ): Promise<TamsubResult> {
-  return callTamsub('/v1/subtitles', fileBuffer, filename, {
-    language: opts.language ?? 'th'
+  return callTamsub('/v1/subtitles', 'media', fileBuffer, filename, {
+    source: opts.useWalletCredit ? 'wallet' : ''
   });
 }
 
 export async function tamsubDewatermark(fileBuffer: Buffer, filename: string): Promise<TamsubResult> {
-  return callTamsub('/v1/dewatermark', fileBuffer, filename, {});
+  return callTamsub('/v1/dewatermark', 'video', fileBuffer, filename, {});
 }

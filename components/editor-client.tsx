@@ -49,6 +49,21 @@ const OPERATIONS: { value: Operation; label: string; billing: string }[] = [
   }
 ];
 
+// Tamsub's real /v1/renders templateId enum — confirmed against their live
+// /developers docs (2026-08-19). Free tiers include minimal + pop; the rest
+// need a premium plan or "ใช้เครดิตคลิปทันที" (useWalletCredit).
+const TAMSUB_TEMPLATE_IDS: { value: string; label: string }[] = [
+  { value: 'pop', label: 'Pop (ค่าเริ่มต้น — คำเด้งทีละคำ, ฟรี)' },
+  { value: 'minimal', label: 'Minimal (ฟรี)' },
+  { value: 'minimal-box', label: 'Minimal Box (พรีเมียม)' },
+  { value: 'focus-scale', label: 'Focus Scale (พรีเมียม)' },
+  { value: 'focus-color', label: 'Focus Color (พรีเมียม)' },
+  { value: 'tiktok-karaoke', label: 'TikTok Karaoke (พรีเมียม)' },
+  { value: 'typewriter', label: 'Typewriter (พรีเมียม)' },
+  { value: 'neon', label: 'Neon (พรีเมียม)' },
+  { value: 'wave', label: 'Wave (พรีเมียม)' }
+];
+
 const WATERMARK_CORNERS: { value: string; label: string }[] = [
   { value: 'bottom-right', label: 'ล่างขวา' },
   { value: 'bottom-left', label: 'ล่างซ้าย' },
@@ -100,10 +115,21 @@ export default function EditorClient({ products, recentJobs }: Props) {
   const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'signing' | 'done' | 'error'>('idle');
   const [uploadError, setUploadError] = useState('');
   const [productId, setProductId] = useState('');
-  const [templateId, setTemplateId] = useState('');
-  const [language, setLanguage] = useState('th');
-  const [thresholdDb, setThresholdDb] = useState<number | ''>('');
-  const [minSilenceMs, setMinSilenceMs] = useState<number | ''>('');
+  // RENDER (Tamsub) — templateId must be one of Tamsub's real template IDs
+  // (confirmed against their live /developers docs), positionYPct/
+  // useWalletCredit map to Tamsub's real "payload"/"source" fields. There is
+  // no "language" param in Tamsub's actual API (it auto-transcribes
+  // Thai-aware speech) — the old language selector here did nothing and was
+  // removed rather than left as a dead control.
+  const [templateId, setTemplateId] = useState('pop');
+  const [positionYPct, setPositionYPct] = useState(78);
+  const [useWalletCredit, setUseWalletCredit] = useState(false);
+  // SILENCE_CUT (Tamsub) — real field units are % of peak loudness and
+  // seconds, not dB/ms (the old threshold_db/min_silence_ms fields were
+  // silently ignored by Tamsub's actual API).
+  const [thresholdPct, setThresholdPct] = useState<number | ''>('');
+  const [minGapSec, setMinGapSec] = useState<number | ''>('');
+  const [bridgeSec, setBridgeSec] = useState<number | ''>('');
   const [watermarkCorner, setWatermarkCorner] = useState('bottom-right');
   const [watermarkSize, setWatermarkSize] = useState('medium');
 
@@ -150,10 +176,12 @@ export default function EditorClient({ products, recentJobs }: Props) {
           operation,
           source_url: sourceUrl,
           product_id: productId || null,
-          template_id: templateId || undefined,
-          language: language || undefined,
-          threshold_db: thresholdDb === '' ? undefined : thresholdDb,
-          min_silence_ms: minSilenceMs === '' ? undefined : minSilenceMs,
+          template_id: operation === 'RENDER' ? templateId || undefined : undefined,
+          position_y_pct: operation === 'RENDER' ? positionYPct : undefined,
+          use_wallet_credit: operation === 'RENDER' || operation === 'SUBTITLE_SRT' ? useWalletCredit : undefined,
+          threshold_pct: thresholdPct === '' ? undefined : thresholdPct,
+          min_gap_sec: minGapSec === '' ? undefined : minGapSec,
+          bridge_sec: bridgeSec === '' ? undefined : bridgeSec,
           watermark_corner: watermarkCorner || undefined,
           watermark_size: watermarkSize || undefined,
           burn_in: operation === 'PUNCHY_SRT' ? burnIn : undefined,
@@ -448,43 +476,77 @@ export default function EditorClient({ products, recentJobs }: Props) {
             </select>
           </div>
 
-          {(operation === 'RENDER' || operation === 'SUBTITLE_SRT') && (
-            <div>
-              <label className="field-label">ภาษาซับ</label>
-              <select value={language} onChange={(e) => setLanguage(e.target.value)}>
-                <option value="th">ไทย</option>
-                <option value="en">English</option>
-              </select>
-            </div>
+          {operation === 'RENDER' && (
+            <>
+              <div>
+                <label className="field-label">Template (Tamsub)</label>
+                <select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
+                  {TAMSUB_TEMPLATE_IDS.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="field-label">ตำแหน่งแนวตั้ง (% จากด้านบน)</label>
+                <div className="flex items-center gap-3">
+                  <input type="range" min={0} max={100} step={1} value={positionYPct} onChange={(e) => setPositionYPct(Number(e.target.value))} className="flex-1" />
+                  <span className="text-sm w-12 text-right">{positionYPct}%</span>
+                </div>
+              </div>
+            </>
           )}
 
-          {operation === 'RENDER' && (
-            <div>
-              <label className="field-label">Template</label>
-              <input value={templateId} onChange={(e) => setTemplateId(e.target.value)} placeholder="เช่น tiktok-karaoke, pop" />
+          {(operation === 'RENDER' || operation === 'SUBTITLE_SRT') && (
+            <div className="sm:col-span-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={useWalletCredit} onChange={(e) => setUseWalletCredit(e.target.checked)} />
+                ใช้เครดิตคลิปทันที (ปลดล็อกทุกเทมเพลต + ความยาวสูงสุด แทนรอโควต้าแพลน)
+              </label>
             </div>
           )}
 
           {operation === 'SILENCE_CUT' && (
             <>
               <div>
-                <label className="field-label">Threshold (dB, ไม่บังคับ)</label>
+                <label className="field-label">ระดับเสียงเงียบ (% ของเสียงดังสุดในคลิป, ไม่บังคับ — ค่าเริ่มต้น 20)</label>
                 <input
                   type="number"
-                  value={thresholdDb}
-                  onChange={(e) => setThresholdDb(e.target.value === '' ? '' : Number(e.target.value))}
-                  placeholder="-35"
+                  min={1}
+                  max={90}
+                  value={thresholdPct}
+                  onChange={(e) => setThresholdPct(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder="20"
                 />
               </div>
               <div>
-                <label className="field-label">ความยาวเงียบขั้นต่ำ (ms, ไม่บังคับ)</label>
+                <label className="field-label">ความยาวเงียบขั้นต่ำ (วินาที, ไม่บังคับ — ค่าเริ่มต้น 0.1)</label>
                 <input
                   type="number"
-                  value={minSilenceMs}
-                  onChange={(e) => setMinSilenceMs(e.target.value === '' ? '' : Number(e.target.value))}
-                  placeholder="500"
+                  min={0.1}
+                  max={2}
+                  step={0.1}
+                  value={minGapSec}
+                  onChange={(e) => setMinGapSec(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder="0.1"
                 />
               </div>
+              <div>
+                <label className="field-label">รวมช่วงเสียงดังสั้นๆ ที่คั่นกลาง (วินาที, ไม่บังคับ — ค่าเริ่มต้น 0)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={0.6}
+                  step={0.1}
+                  value={bridgeSec}
+                  onChange={(e) => setBridgeSec(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder="0"
+                />
+              </div>
+              <p className="text-xs text-gray-500 sm:col-span-2">
+                ตัดเกินไป → เพิ่มความยาวเงียบขั้นต่ำ · ตัดน้อยเกินไป → ลดค่านี้ลง หรือปรับ % ระดับเสียงเงียบ
+              </p>
             </>
           )}
 

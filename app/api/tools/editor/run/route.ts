@@ -30,10 +30,19 @@ const requestSchema = z.object({
   operation: z.enum(['SILENCE_CUT', 'RENDER', 'SUBTITLE_SRT', 'DEWATERMARK', 'PUNCHY_SRT', 'DEWATERMARK_LOCAL']),
   source_url: z.string().min(1),
   product_id: z.string().uuid().nullable().optional(),
+  // RENDER (Tamsub) — templateId must be one of Tamsub's real template IDs
+  // (see TAMSUB_TEMPLATE_IDS below); positionYPct/use_wallet_credit map to
+  // Tamsub's real "payload"/"source" fields (see lib/tamsub/client.ts).
   template_id: z.string().optional(),
-  language: z.string().optional(),
-  threshold_db: z.number().optional(),
-  min_silence_ms: z.number().optional(),
+  position_y_pct: z.number().min(0).max(100).optional(),
+  use_wallet_credit: z.boolean().optional(),
+  // SILENCE_CUT (Tamsub) — real field names/units are thresholdPct (%),
+  // minGapSec/bridgeSec (seconds), not dB/ms. Renamed after discovering the
+  // old threshold_db/min_silence_ms fields didn't match Tamsub's actual API
+  // at all (silently ignored, always used Tamsub's own defaults).
+  threshold_pct: z.number().min(1).max(90).optional(),
+  min_gap_sec: z.number().min(0.1).max(2).optional(),
+  bridge_sec: z.number().min(0).max(0.6).optional(),
   watermark_corner: z.enum(['top-left', 'top-right', 'bottom-left', 'bottom-right']).optional(),
   watermark_size: z.enum(['small', 'medium', 'large']).optional(),
   // Styled-caption burn-in (PUNCHY_SRT only) — Tamsub-editor-style font/size/
@@ -301,9 +310,11 @@ export async function POST(request: Request) {
           source_url: input.source_url,
           template_id: input.template_id ?? null,
           options: {
-            language: input.language ?? null,
-            threshold_db: input.threshold_db ?? null,
-            min_silence_ms: input.min_silence_ms ?? null,
+            position_y_pct: input.position_y_pct ?? null,
+            use_wallet_credit: input.use_wallet_credit ?? null,
+            threshold_pct: input.threshold_pct ?? null,
+            min_gap_sec: input.min_gap_sec ?? null,
+            bridge_sec: input.bridge_sec ?? null,
             watermark_corner: input.watermark_corner ?? null,
             watermark_size: input.watermark_size ?? null,
             burn_in: input.burn_in ?? null,
@@ -369,18 +380,20 @@ export async function POST(request: Request) {
           switch (input.operation) {
             case 'SILENCE_CUT':
               result = await tamsubSilenceCut(fileBuffer, filename, {
-                threshold_db: input.threshold_db,
-                min_silence_ms: input.min_silence_ms
+                thresholdPct: input.threshold_pct,
+                minGapSec: input.min_gap_sec,
+                bridgeSec: input.bridge_sec
               });
               break;
             case 'RENDER':
               result = await tamsubRender(fileBuffer, filename, {
-                template_id: input.template_id,
-                language: input.language
+                templateId: input.template_id,
+                positionYPct: input.position_y_pct,
+                useWalletCredit: input.use_wallet_credit
               });
               break;
             case 'SUBTITLE_SRT':
-              result = await tamsubSubtitlesSrt(fileBuffer, filename, { language: input.language });
+              result = await tamsubSubtitlesSrt(fileBuffer, filename, { useWalletCredit: input.use_wallet_credit });
               break;
             case 'DEWATERMARK':
               result = await tamsubDewatermark(fileBuffer, filename);
