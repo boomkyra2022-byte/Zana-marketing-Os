@@ -64,14 +64,22 @@ const sceneSchema = z.object({
   transition: z.string()
 });
 
+const editingStyleSchema = z.object({
+  pacing: z.string(),
+  typography: z.string(),
+  sfx: z.string()
+});
+
 const partSchema = z.object({
   part_number: z.number().int(),
   time_range: z.string(),
   part_purpose: z.string(),
+  emotion: z.string(),
+  micro_cta: z.string(),
   scenes: z.array(sceneSchema),
   full_voice_over: z.string(),
   on_screen_text: z.array(z.string()),
-  editing_style: z.string(),
+  editing_style: editingStyleSchema,
   retention_device: z.string(),
   continuity_note: z.string(),
   negative_instructions: z.string(),

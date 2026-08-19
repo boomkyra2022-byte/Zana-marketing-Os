@@ -355,19 +355,21 @@ OUTPUT FORMAT — ตอบเป็น JSON เท่านั้น ห้า�
     {
       "part_number": number,
       "time_range": string (เช่น "0:00-0:10"),
-      "part_purpose": string,
+      "part_purpose": string (วลีสั้น — นี่คือค่าที่ใช้เป็น VIDEO OBJECTIVE ใน prompt_text ด้วย),
+      "emotion": string (2-4 คำ เช่น "Strategic Insight, Clarity"),
+      "micro_cta": string (CTA เฉพาะของ PART นี้ — ดูคำอธิบายในโครงสร้างด้านบน),
       "scenes": [
         {"scene_number": number, "time_range": string, "purpose": string, "visual": string, "subject": string, "action": string, "camera": string, "motion_graphic": string, "on_screen_text": string, "voice_over": string, "sound": string, "transition": string}
       ],
       "full_voice_over": string (~25-35 คำ เต็มความยาว 10 วินาที ห้ามสั้นแค่ 1-2 ประโยคแล้วปล่อยเงียบ — ดูกฎ VOICE OVER PACING ด้านบน),
       "on_screen_text": string[],
-      "editing_style": string,
-      "retention_device": string,
-      "continuity_note": string,
-      "negative_instructions": string,
-      "final_feel": string,
+      "editing_style": {"pacing": string, "typography": string, "sfx": string},
+      "retention_device": string (ใช้ภายในเพื่อประกอบการคิด VISUAL/ACTION ของ scene เท่านั้น — ห้ามปรากฏเป็นหัวข้อแยกใน prompt_text),
+      "continuity_note": string (นี่คือ 1 บรรทัดที่จะใช้เป็นเนื้อหาใต้หัวข้อ CONTINUITY ใน prompt_text — ต้องกระชับตามตัวอย่าง),
+      "negative_instructions": string (list สั้นๆ คั่นด้วยจุลภาค — นี่คือเนื้อหาใต้หัวข้อ NEGATIVE INSTRUCTIONS ใน prompt_text),
+      "final_feel": string (ใช้ภายในเท่านั้น — ห้ามปรากฏเป็นหัวข้อแยกใน prompt_text),
       "handoff_to_next": string (บันทึกภายในสำหรับระบบเราเพื่อความต่อเนื่อง — ไม่ต้องใส่ใน prompt_text),
-      "prompt_text": string (Master Prompt ฉบับสมบูรณ์ตามโครงสร้าง 11 หัวข้อด้านบน พร้อม copy ไปวางใน Google Flow ได้ทันที)
+      "prompt_text": string (Master Prompt ฉบับสมบูรณ์ตามโครงสร้างด้านบนเป๊ะๆ พร้อม copy ไปวางใน Google Flow ได้ทันที)
     }
   ]
 }`;
@@ -433,14 +435,16 @@ OUTPUT FORMAT — ตอบเป็น JSON object เดียว (ไม่�
   "part_number": ${ctx.targetPartNumber},
   "time_range": "${ctx.targetTimeRange}",
   "part_purpose": string,
+  "emotion": string (2-4 คำ),
+  "micro_cta": string,
   "scenes": [{"scene_number": number, "time_range": string, "purpose": string, "visual": string, "subject": string, "action": string, "camera": string, "motion_graphic": string, "on_screen_text": string, "voice_over": string, "sound": string, "transition": string}],
   "full_voice_over": string (~25-35 คำ เต็มความยาว 10 วินาที ห้ามสั้นแค่ 1-2 ประโยคแล้วปล่อยเงียบ — ดูกฎ VOICE OVER PACING ด้านบน),
   "on_screen_text": string[],
-  "editing_style": string,
-  "retention_device": string,
-  "continuity_note": string,
-  "negative_instructions": string,
-  "final_feel": string,
+  "editing_style": {"pacing": string, "typography": string, "sfx": string},
+  "retention_device": string (ใช้ภายในเท่านั้น ห้ามปรากฏเป็นหัวข้อแยกใน prompt_text),
+  "continuity_note": string (1 บรรทัดกระชับ ใช้เป็นเนื้อหาใต้หัวข้อ CONTINUITY),
+  "negative_instructions": string (list สั้นๆ คั่นจุลภาค),
+  "final_feel": string (ใช้ภายในเท่านั้น ห้ามปรากฏเป็นหัวข้อแยกใน prompt_text),
   "handoff_to_next": string,
   "prompt_text": string
 }`;
