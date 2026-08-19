@@ -11,7 +11,7 @@ import { uploadEditedClip } from '@/lib/supabase/storage';
 import { tamsubSilenceCut, tamsubRender, tamsubSubtitlesSrt, tamsubDewatermark, TamsubError, type TamsubResult } from '@/lib/tamsub/client';
 import { transcribeAudioWithTimestamps, callOpenAIJSON, AIProviderError } from '@/lib/ai/openai';
 import { buildPunchySubtitlePrompt, PROMPT_VERSION_PUNCHY_SUBTITLE } from '@/prompts/punchy-subtitle';
-import { repairCueCoverage, resolveCueTimestamps, resolveCueTimestampsWithWords, cuesToSrt, type RawCue } from '@/lib/media/srt';
+import { repairCueCoverage, resolveCueTimestamps, resolveCueTimestampsWithWords, cuesToSrt, type RawCue, type TimedCueWithWords } from '@/lib/media/srt';
 import { buildKaraokeAss } from '@/lib/media/ass';
 
 // Editor tool (silence-cut / subtitle burn-in / SRT export / dewatermark /
@@ -43,7 +43,34 @@ const requestSchema = z.object({
   font_size_px: z.number().int().min(16).max(160).optional(),
   max_words_per_cue: z.number().int().min(2).max(10).optional(),
   text_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-  highlight_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional()
+  highlight_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  vertical_position_pct: z.number().min(0).max(100).optional(),
+  // Live Editor (Tamsub-style timeline + live preview) sends back the
+  // user-edited cues from POST /api/tools/editor/transcribe instead of
+  // making us re-transcribe + re-run the AI grouping from scratch — this is
+  // also what carries any manual drag/retype edits the user made in the
+  // timeline through to the actual burn. When present + burn_in=true, this
+  // is used verbatim (see runPunchySubtitle below); when absent, the old
+  // "transcribe from scratch every time" behavior is kept for backward
+  // compatibility (e.g. plain-SRT-only requests that never touched the
+  // Live Editor).
+  cues: z
+    .array(
+      z.object({
+        start: z.number(),
+        end: z.number(),
+        text: z.string(),
+        words: z.array(
+          z.object({
+            text: z.string(),
+            start: z.number(),
+            end: z.number(),
+            durationCs: z.number()
+          })
+        )
+      })
+    )
+    .optional()
 });
 
 const punchyCuesSchema = z.object({
@@ -70,6 +97,11 @@ interface PunchyStyleOptions {
   maxWordsPerCue: number;
   textColorHex?: string;
   highlightColorHex?: string;
+  verticalPositionPct?: number;
+  // Pre-transcribed (and possibly manually edited in the Live Editor) cues
+  // — when present, skips Whisper + AI grouping entirely and burns these
+  // verbatim instead.
+  cues?: TimedCueWithWords[];
 }
 
 async function runPunchySubtitle(
@@ -85,52 +117,80 @@ async function runPunchySubtitle(
   const burnedPath = path.join(tmpDir, `editor_${runId}_burned.mp4`);
   try {
     const metadata = await probeMetadata(sourcePath);
-    await extractAudio(sourcePath, audioPath);
-    const audioBuffer = fs.readFileSync(audioPath);
 
-    const { words } = await transcribeAudioWithTimestamps({ fileBuffer: audioBuffer, filename: 'audio.mp3' });
+    let timedCuesWithWords: TimedCueWithWords[];
+    let promptVersionMeta: string;
 
-    let productName: string | null = null;
-    let brand: string | null = null;
-    if (productId) {
-      const { data: product } = await supabase.from('products').select('product_name, brand').eq('id', productId).single();
-      productName = product?.product_name ?? null;
-      brand = product?.brand ?? null;
-    }
+    if (style.cues && style.cues.length > 0) {
+      // Live Editor path (Tamsub-style timeline + live preview) — the
+      // client already ran /api/tools/editor/transcribe and the user may
+      // have dragged word boundaries / retyped text in the browser. Use
+      // that verbatim instead of re-transcribing + re-running the AI
+      // grouping from scratch, which would silently throw away any manual
+      // edits the user just made.
+      timedCuesWithWords = style.cues;
+      promptVersionMeta = 'live-editor-manual';
 
-    const { system, user: userPrompt } = buildPunchySubtitlePrompt({
-      words,
-      durationSec: metadata.durationSec,
-      productName,
-      brand,
-      knownTerms: [],
-      maxWordsPerCue: style.maxWordsPerCue
-    });
-
-    const { text: aiText } = await callOpenAIJSON({ system, user: userPrompt, temperature: 0.2, timeoutMs: 120000 });
-
-    let rawCues: RawCue[];
-    let corrections: { word_index: number; corrected_word: string }[];
-    try {
-      const parsedJson = JSON.parse(aiText);
-      const validated = punchyCuesSchema.safeParse(parsedJson);
-      if (!validated.success) {
-        throw new Error(`AI response did not match expected schema: ${JSON.stringify(validated.error.flatten())}`);
+      if (!style.burnIn) {
+        return { kind: 'text', text: cuesToSrt(timedCuesWithWords), meta: { prompt_version: promptVersionMeta } };
       }
-      rawCues = validated.data.cues;
-      corrections = validated.data.corrections ?? [];
-    } catch (err: any) {
-      throw new AIProviderError(err.message || 'AI response was not valid JSON', 502);
-    }
+    } else {
+      // Legacy/no-preview path — transcribe + AI-group from scratch, same
+      // as before the Live Editor existed. Still used when burn_in is
+      // requested without going through the transcribe step first.
+      await extractAudio(sourcePath, audioPath);
+      const audioBuffer = fs.readFileSync(audioPath);
 
-    const repaired = repairCueCoverage(words, rawCues);
+      const { words } = await transcribeAudioWithTimestamps({ fileBuffer: audioBuffer, filename: 'audio.mp3' });
 
-    if (!style.burnIn) {
-      const timedCues = resolveCueTimestamps(words, repaired, corrections);
-      if (timedCues.length === 0) {
+      let productName: string | null = null;
+      let brand: string | null = null;
+      if (productId) {
+        const { data: product } = await supabase.from('products').select('product_name, brand').eq('id', productId).single();
+        productName = product?.product_name ?? null;
+        brand = product?.brand ?? null;
+      }
+
+      const { system, user: userPrompt } = buildPunchySubtitlePrompt({
+        words,
+        durationSec: metadata.durationSec,
+        productName,
+        brand,
+        knownTerms: [],
+        maxWordsPerCue: style.maxWordsPerCue
+      });
+
+      const { text: aiText } = await callOpenAIJSON({ system, user: userPrompt, temperature: 0.2, timeoutMs: 120000 });
+
+      let rawCues: RawCue[];
+      let corrections: { word_index: number; corrected_word: string }[];
+      try {
+        const parsedJson = JSON.parse(aiText);
+        const validated = punchyCuesSchema.safeParse(parsedJson);
+        if (!validated.success) {
+          throw new Error(`AI response did not match expected schema: ${JSON.stringify(validated.error.flatten())}`);
+        }
+        rawCues = validated.data.cues;
+        corrections = validated.data.corrections ?? [];
+      } catch (err: any) {
+        throw new AIProviderError(err.message || 'AI response was not valid JSON', 502);
+      }
+
+      const repaired = repairCueCoverage(words, rawCues);
+
+      if (!style.burnIn) {
+        const timedCues = resolveCueTimestamps(words, repaired, corrections);
+        if (timedCues.length === 0) {
+          throw new AIProviderError('สร้าง subtitle ไม่สำเร็จ — AI ไม่ได้คืนค่า cue ที่ใช้ได้', 502);
+        }
+        return { kind: 'text', text: cuesToSrt(timedCues), meta: { prompt_version: PROMPT_VERSION_PUNCHY_SUBTITLE } };
+      }
+
+      timedCuesWithWords = resolveCueTimestampsWithWords(words, repaired, corrections);
+      promptVersionMeta = PROMPT_VERSION_PUNCHY_SUBTITLE;
+      if (timedCuesWithWords.length === 0) {
         throw new AIProviderError('สร้าง subtitle ไม่สำเร็จ — AI ไม่ได้คืนค่า cue ที่ใช้ได้', 502);
       }
-      return { kind: 'text', text: cuesToSrt(timedCues), meta: { prompt_version: PROMPT_VERSION_PUNCHY_SUBTITLE } };
     }
 
     // Styled burn-in path — Tamsub-editor-style font/size/color/highlight
@@ -139,10 +199,6 @@ async function runPunchySubtitle(
     // word-index -> real-timestamp grounding as the plain-SRT path; only the
     // output format changes (styled .ass burned onto the video instead of a
     // plain .srt file).
-    const timedCuesWithWords = resolveCueTimestampsWithWords(words, repaired, corrections);
-    if (timedCuesWithWords.length === 0) {
-      throw new AIProviderError('สร้าง subtitle ไม่สำเร็จ — AI ไม่ได้คืนค่า cue ที่ใช้ได้', 502);
-    }
     if (!metadata.width || !metadata.height) {
       throw new MediaProcessingError('อ่านขนาดวิดีโอไม่ได้ — ไม่สามารถวางตำแหน่งซับสไตล์ได้', 'subtitle_burn');
     }
@@ -153,7 +209,8 @@ async function runPunchySubtitle(
       textColorHex: style.textColorHex ?? '#FFFFFF',
       highlightColorHex: style.highlightColorHex ?? '#FACC15',
       videoWidth: metadata.width,
-      videoHeight: metadata.height
+      videoHeight: metadata.height,
+      verticalPositionPct: style.verticalPositionPct
     });
     fs.writeFileSync(assPath, assContent, 'utf8');
 
@@ -169,8 +226,14 @@ async function runPunchySubtitle(
       buffer: fs.readFileSync(burnedPath),
       contentType: 'video/mp4',
       meta: {
-        prompt_version: PROMPT_VERSION_PUNCHY_SUBTITLE,
-        style: { fontName: style.fontName ?? 'Kanit', fontSizePx: style.fontSizePx ?? 56, textColorHex: style.textColorHex ?? '#FFFFFF', highlightColorHex: style.highlightColorHex ?? '#FACC15' }
+        prompt_version: promptVersionMeta,
+        style: {
+          fontName: style.fontName ?? 'Kanit',
+          fontSizePx: style.fontSizePx ?? 56,
+          textColorHex: style.textColorHex ?? '#FFFFFF',
+          highlightColorHex: style.highlightColorHex ?? '#FACC15',
+          verticalPositionPct: style.verticalPositionPct ?? null
+        }
       }
     };
   } finally {
@@ -248,7 +311,9 @@ export async function POST(request: Request) {
             font_size_px: input.font_size_px ?? null,
             max_words_per_cue: input.max_words_per_cue ?? null,
             text_color: input.text_color ?? null,
-            highlight_color: input.highlight_color ?? null
+            highlight_color: input.highlight_color ?? null,
+            vertical_position_pct: input.vertical_position_pct ?? null,
+            used_live_editor_cues: Boolean(input.cues && input.cues.length > 0)
           },
           product_id: input.product_id ?? null,
           status: 'PENDING',
@@ -286,7 +351,9 @@ export async function POST(request: Request) {
             fontSizePx: input.font_size_px,
             maxWordsPerCue: input.max_words_per_cue ?? 6,
             textColorHex: input.text_color,
-            highlightColorHex: input.highlight_color
+            highlightColorHex: input.highlight_color,
+            verticalPositionPct: input.vertical_position_pct,
+            cues: input.cues
           });
         } else if (input.operation === 'DEWATERMARK_LOCAL') {
           const dewm = await runLocalDewatermark(

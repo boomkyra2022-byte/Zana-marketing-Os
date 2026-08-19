@@ -36,7 +36,14 @@ const nextConfig = {
       // render with and text comes out as tofu/boxes.
       '/api/tools/editor/run': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './assets/fonts/**'],
       '/api/tools/editor/run/route': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './assets/fonts/**'],
-      '/api/tools/editor/run/**/*': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './assets/fonts/**']
+      '/api/tools/editor/run/**/*': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './assets/fonts/**'],
+      // Live Editor transcribe-only step (added for the Tamsub-style
+      // timeline + live preview) — calls probeMetadata/extractAudio too, so
+      // needs the same ffmpeg/ffprobe binaries. No font file needed here
+      // (it never burns anything onto the video, just extracts audio).
+      '/api/tools/editor/transcribe': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**'],
+      '/api/tools/editor/transcribe/route': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**'],
+      '/api/tools/editor/transcribe/**/*': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**']
     }
   }
 };

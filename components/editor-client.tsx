@@ -2,6 +2,7 @@
 
 import { useState, type ChangeEvent } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import EditorLivePreview, { type LivePreviewCue } from '@/components/editor-live-preview';
 
 const MAX_UPLOAD_BYTES = 300 * 1024 * 1024; // matches server-side MAX_BYTES_DEFAULT
 const ALLOWED_UPLOAD_TYPES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'];
@@ -113,6 +114,19 @@ export default function EditorClient({ products, recentJobs }: Props) {
   const [maxWordsPerCue, setMaxWordsPerCue] = useState(6);
   const [textColor, setTextColor] = useState('#FFFFFF');
   const [highlightColor, setHighlightColor] = useState('#FACC15');
+  const [verticalPositionPct, setVerticalPositionPct] = useState(82);
+
+  // Live Editor (Tamsub-style timeline + live preview) state — added per
+  // explicit user request to replicate tamsub.com's post-upload editor
+  // instead of only the style-panel controls above. `liveCues` is the
+  // source of truth once populated: Export sends it back to /run verbatim
+  // (see handleRun), so any drag/retype edits made in the timeline are
+  // never silently discarded and re-transcribed away.
+  const [liveCues, setLiveCues] = useState<LivePreviewCue[] | null>(null);
+  const [liveAudioUrl, setLiveAudioUrl] = useState('');
+  const [liveMetadata, setLiveMetadata] = useState<{ width: number; height: number; durationSec: number } | null>(null);
+  const [transcribeState, setTranscribeState] = useState<'idle' | 'transcribing' | 'error'>('idle');
+  const [transcribeError, setTranscribeError] = useState('');
 
   const [phase, setPhase] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [progressStatus, setProgressStatus] = useState('');
@@ -147,7 +161,13 @@ export default function EditorClient({ products, recentJobs }: Props) {
           font_size_px: operation === 'PUNCHY_SRT' && burnIn ? fontSizePx : undefined,
           max_words_per_cue: operation === 'PUNCHY_SRT' ? maxWordsPerCue : undefined,
           text_color: operation === 'PUNCHY_SRT' && burnIn ? textColor : undefined,
-          highlight_color: operation === 'PUNCHY_SRT' && burnIn ? highlightColor : undefined
+          highlight_color: operation === 'PUNCHY_SRT' && burnIn ? highlightColor : undefined,
+          vertical_position_pct: operation === 'PUNCHY_SRT' && burnIn ? verticalPositionPct : undefined,
+          // Live Editor cues (from /api/tools/editor/transcribe, possibly
+          // drag/retype-edited by the user) — when present the server burns
+          // these verbatim instead of re-transcribing from scratch, so
+          // manual edits actually make it into the exported video.
+          cues: operation === 'PUNCHY_SRT' && burnIn && liveCues ? liveCues : undefined
         })
       });
 
@@ -187,12 +207,52 @@ export default function EditorClient({ products, recentJobs }: Props) {
     }
   }
 
+  // Discards any transcribed/edited Live Editor cues — called whenever the
+  // source video changes (new upload, new link, or re-transcribe request)
+  // so we never accidentally burn captions timed against a *different*
+  // video onto the new one.
+  function resetLiveEditor() {
+    setLiveCues(null);
+    setLiveAudioUrl('');
+    setLiveMetadata(null);
+    setTranscribeState('idle');
+    setTranscribeError('');
+  }
+
   function switchSourceMode(mode: 'link' | 'upload') {
     setSourceMode(mode);
     setSourceUrl('');
     setUploadFileName('');
     setUploadState('idle');
     setUploadError('');
+    resetLiveEditor();
+  }
+
+  async function transcribeForLiveEdit() {
+    if (!sourceUrl) return;
+    resetLiveEditor();
+    setTranscribeState('transcribing');
+    try {
+      const res = await fetch('/api/tools/editor/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_url: sourceUrl,
+          product_id: productId || null,
+          max_words_per_cue: maxWordsPerCue
+        })
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'ถอดเสียงไม่สำเร็จ');
+
+      setLiveCues(json.cues);
+      setLiveAudioUrl(json.audio_url);
+      setLiveMetadata({ width: json.metadata.width, height: json.metadata.height, durationSec: json.metadata.duration_sec });
+      setTranscribeState('idle');
+    } catch (err: any) {
+      setTranscribeState('error');
+      setTranscribeError(err.message || 'ถอดเสียงไม่สำเร็จ');
+    }
   }
 
   async function handleFileSelected(e: ChangeEvent<HTMLInputElement>) {
@@ -215,6 +275,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
     setUploadError('');
     setUploadState('uploading');
     setSourceUrl('');
+    resetLiveEditor();
 
     try {
       const supabaseBrowser = createClient();
@@ -252,6 +313,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
       setSourceUrl(result.signed_url);
       setResult(null);
       setPhase('idle');
+      resetLiveEditor();
     }
   }
 
@@ -348,7 +410,10 @@ export default function EditorClient({ products, recentJobs }: Props) {
             <>
               <input
                 value={sourceUrl}
-                onChange={(e) => setSourceUrl(e.target.value)}
+                onChange={(e) => {
+                  setSourceUrl(e.target.value);
+                  resetLiveEditor();
+                }}
                 placeholder="https://drive.google.com/file/d/... หรือ https://..."
               />
               <p className="text-xs text-gray-500 mt-1">
@@ -502,6 +567,22 @@ export default function EditorClient({ products, recentJobs }: Props) {
                   </div>
                 </div>
 
+                <div>
+                  <label className="field-label">ตำแหน่งแนวตั้ง (% จากด้านบน)</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={10}
+                      max={95}
+                      step={1}
+                      value={verticalPositionPct}
+                      onChange={(e) => setVerticalPositionPct(Number(e.target.value))}
+                      className="flex-1"
+                    />
+                    <span className="text-sm w-12 text-right">{verticalPositionPct}%</span>
+                  </div>
+                </div>
+
                 {/* Cosmetic only — loads the real Kanit webfont so the preview below matches
                     what gets burned into the video. Doesn't affect the server-side render,
                     which uses the .ttf file in assets/fonts/. */}
@@ -555,18 +636,69 @@ export default function EditorClient({ products, recentJobs }: Props) {
                   <span className="px-2 py-1 rounded-full bg-green-50 text-green-700 border border-green-200">✓ ไม่เว้นวรรคระหว่างคำไทยแบบผิดหลัก (บังคับอยู่แล้วในระบบ)</span>
                 </div>
 
+                {/* Live Editor (Tamsub-style timeline + live preview) —
+                    added per explicit user request. Requires a transcribe
+                    step first (real Whisper word timing), then lets the
+                    user drag word boundaries / retype text before the
+                    (slow) ffmpeg burn — see components/editor-live-preview.tsx. */}
+                <div className="card p-4 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <h4 className="font-semibold text-sm">Live Editor — Timeline &amp; Preview สด (แบบ Tamsub)</h4>
+                    {liveCues && (
+                      <button type="button" className="text-accentBlue text-xs" onClick={transcribeForLiveEdit} disabled={transcribeState === 'transcribing'}>
+                        ↻ ถอดเสียงใหม่
+                      </button>
+                    )}
+                  </div>
+
+                  {!liveCues && (
+                    <>
+                      <p className="text-xs text-gray-500">
+                        ถอดเสียงจริงด้วย Whisper ก่อน เพื่อเปิด Live Editor ให้เล่นวิดีโอดูซับสด, ลากปรับจังหวะคำ และแก้ข้อความก่อนเผาลงวิดีโอจริง
+                      </p>
+                      <button type="button" className="btn-secondary" disabled={!sourceUrl || transcribeState === 'transcribing'} onClick={transcribeForLiveEdit}>
+                        {transcribeState === 'transcribing' ? 'กำลังถอดเสียง...' : 'ถอดเสียง & เปิด Live Editor'}
+                      </button>
+                      {transcribeState === 'error' && <p className="text-xs text-red-600">{transcribeError}</p>}
+                    </>
+                  )}
+
+                  {liveCues && liveMetadata && (
+                    <EditorLivePreview
+                      sourceUrl={sourceUrl}
+                      audioUrl={liveAudioUrl}
+                      durationSec={liveMetadata.durationSec}
+                      videoWidthPx={liveMetadata.width}
+                      cues={liveCues}
+                      onCuesChange={setLiveCues}
+                      fontName={fontName}
+                      fontSizePx={fontSizePx}
+                      textColor={textColor}
+                      highlightColor={highlightColor}
+                      verticalPositionPct={verticalPositionPct}
+                    />
+                  )}
+                </div>
+
                 <p className="text-xs text-gray-500 bg-white rounded-lg p-3 border border-border">
                   ⚠ ฟีเจอร์นี้เผาซับลงวิดีโอจริงด้วย ffmpeg — ต้องมีไฟล์ฟอนต์ Kanit วางไว้ในเซิร์ฟเวอร์ก่อน (ดู <code>assets/fonts/README.md</code>)
-                  และยังไม่เคยทดสอบจริงบน production — ถ้าล้มเหลวให้ลองปิด Burn-in แล้วใช้ไฟล์ .srt ธรรมดาไปก่อน
+                  ทั้งการเผาซับ (libass) และ Live Editor timeline นี้ยังไม่เคยทดสอบจริงบน production มาก่อน — ถ้าล้มเหลวให้ลองปิด Burn-in แล้วใช้ไฟล์ .srt ธรรมดาไปก่อน
                 </p>
               </>
             )}
           </div>
         )}
 
-        <button className="btn-primary" disabled={!sourceUrl || phase === 'running'} onClick={handleRun}>
-          {phase === 'running' ? 'กำลังประมวลผล...' : 'Run'}
+        <button
+          className="btn-primary"
+          disabled={!sourceUrl || phase === 'running' || (operation === 'PUNCHY_SRT' && burnIn && !liveCues)}
+          onClick={handleRun}
+        >
+          {phase === 'running' ? 'กำลังประมวลผล...' : operation === 'PUNCHY_SRT' && burnIn ? 'ส่งออกวิดีโอ (เผาซับ)' : 'Run'}
         </button>
+        {operation === 'PUNCHY_SRT' && burnIn && !liveCues && (
+          <p className="text-xs text-gray-500">ต้องถอดเสียงใน Live Editor ด้านบนก่อน ถึงจะส่งออกวิดีโอได้</p>
+        )}
 
         {phase === 'running' && (
           <div className="card p-4 bg-surface text-sm flex items-center gap-3">

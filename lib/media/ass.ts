@@ -27,6 +27,11 @@ export interface KaraokeStyle {
   highlightColorHex: string; // e.g. "#FACC15"
   videoWidth: number;
   videoHeight: number;
+  // 0-100, "% down from the top of the frame" where the caption line sits —
+  // matches the "ตำแหน่งแนวตั้ง %" slider in the Live Editor (Tamsub-style).
+  // Optional so existing callers that don't pass it keep the old fixed
+  // ~88%-down placement (marginV = 12% of height from the bottom).
+  verticalPositionPct?: number;
 }
 
 function hexToAssColor(hex: string): string {
@@ -60,7 +65,13 @@ export function buildKaraokeAss(cues: TimedCueWithWords[], style: KaraokeStyle):
   const highlightColor = hexToAssColor(style.highlightColorHex);
   const outlineColor = '&H00000000';
   const backColor = '&H80000000';
-  const marginV = Math.round(style.videoHeight * 0.12);
+  // Alignment=2 (bottom-center) measures marginV as distance from the
+  // BOTTOM edge, so "% down from the top" needs inverting. Default (no pct
+  // supplied) keeps the original fixed 12%-from-bottom placement.
+  const marginV =
+    style.verticalPositionPct === undefined
+      ? Math.round(style.videoHeight * 0.12)
+      : Math.max(0, Math.round(style.videoHeight * (1 - style.verticalPositionPct / 100)));
   const marginLR = Math.round(style.videoWidth * 0.06);
 
   const header = `[Script Info]
