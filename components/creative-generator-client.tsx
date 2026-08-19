@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type { Idea, Script, Storyboard, StoryboardScene } from '@/types/database';
 
 interface Props {
@@ -318,18 +319,23 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
               </div>
               <div className="space-y-2 max-h-[420px] overflow-y-auto">
                 {ideas.map((idea) => (
-                  <label key={idea.id} className="card p-3 flex gap-3 items-start cursor-pointer">
-                    <input type="checkbox" checked={selectedIdeaIds.has(idea.id)} onChange={() => toggleIdea(idea.id)} className="mt-1" />
-                    <div className="flex-1 text-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{idea.title}</span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-surface border border-border">{idea.funnel_stage}</span>
-                        <span className="text-xs text-accentGreen font-semibold">score {idea.potential_score}/10</span>
+                  <div key={idea.id} className="card p-3 flex gap-3 items-start">
+                    <label className="flex gap-3 items-start cursor-pointer flex-1">
+                      <input type="checkbox" checked={selectedIdeaIds.has(idea.id)} onChange={() => toggleIdea(idea.id)} className="mt-1" />
+                      <div className="flex-1 text-sm">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">{idea.title}</span>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-surface border border-border">{idea.funnel_stage}</span>
+                          <span className="text-xs text-accentGreen font-semibold">score {idea.potential_score}/10</span>
+                        </div>
+                        <div className="text-gray-600 mt-1">Hook: {idea.hook}</div>
+                        {idea.angle && <div className="text-gray-400 text-xs mt-1">Angle: {idea.angle}</div>}
                       </div>
-                      <div className="text-gray-600 mt-1">Hook: {idea.hook}</div>
-                      {idea.angle && <div className="text-gray-400 text-xs mt-1">Angle: {idea.angle}</div>}
-                    </div>
-                  </label>
+                    </label>
+                    <Link href={`/flow-prompt?source=IDEA&source_id=${idea.id}`} className="btn-secondary !px-2 !py-1 !text-xs whitespace-nowrap">
+                      🎬 Flow Prompt
+                    </Link>
+                  </div>
                 ))}
               </div>
 
@@ -368,18 +374,23 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
 
           <div className="space-y-3 max-h-[500px] overflow-y-auto">
             {scripts.map((s) => (
-              <label key={s.id} className="card p-4 flex gap-3 items-start cursor-pointer">
-                <input type="checkbox" checked={selectedScriptIds.has(s.id)} onChange={() => toggleScript(s.id)} className="mt-1" />
-                <div className="flex-1 text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold">{s.title}</span>
-                    <span className="text-xs text-accentGreen font-semibold">score {s.score}/100</span>
-                    <span className="text-xs text-gray-400">~{s.estimated_duration_sec}s</span>
+              <div key={s.id} className="card p-4 flex gap-3 items-start">
+                <label className="flex gap-3 items-start cursor-pointer flex-1">
+                  <input type="checkbox" checked={selectedScriptIds.has(s.id)} onChange={() => toggleScript(s.id)} className="mt-1" />
+                  <div className="flex-1 text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold">{s.title}</span>
+                      <span className="text-xs text-accentGreen font-semibold">score {s.score}/100</span>
+                      <span className="text-xs text-gray-400">~{s.estimated_duration_sec}s</span>
+                    </div>
+                    <div className="text-gray-600 mt-2 whitespace-pre-wrap">{s.full_script}</div>
+                    {s.risks && <div className="text-red-500 text-xs mt-2">⚠ {s.risks}</div>}
                   </div>
-                  <div className="text-gray-600 mt-2 whitespace-pre-wrap">{s.full_script}</div>
-                  {s.risks && <div className="text-red-500 text-xs mt-2">⚠ {s.risks}</div>}
-                </div>
-              </label>
+                </label>
+                <Link href={`/flow-prompt?source=SCRIPT&source_id=${s.id}`} className="btn-secondary !px-2 !py-1 !text-xs whitespace-nowrap">
+                  🎬 Flow Prompt
+                </Link>
+              </div>
             ))}
           </div>
 
@@ -423,13 +434,18 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
 
           {storyboards.map((sb, i) => (
             <div key={sb.id} className="card p-4 overflow-x-auto">
-              <div className="mb-3">
-                <span className="font-semibold">
-                  Storyboard {i + 1}: {sb.title}
-                </span>
-                <span className="text-gray-500 text-sm ml-2">
-                  {sb.total_duration_sec}s · {sb.scene_count} scenes · {sb.tone_mood}
-                </span>
+              <div className="mb-3 flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <span className="font-semibold">
+                    Storyboard {i + 1}: {sb.title}
+                  </span>
+                  <span className="text-gray-500 text-sm ml-2">
+                    {sb.total_duration_sec}s · {sb.scene_count} scenes · {sb.tone_mood}
+                  </span>
+                </div>
+                <Link href={`/flow-prompt?source=STORYBOARD&source_id=${sb.id}`} className="btn-secondary !px-2 !py-1 !text-xs whitespace-nowrap">
+                  🎬 สร้าง Flow Prompt
+                </Link>
               </div>
               <table className="w-full text-xs">
                 <thead className="bg-surface text-left text-gray-500">

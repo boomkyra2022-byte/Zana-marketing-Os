@@ -8,7 +8,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: '/creative-generator', label: 'Creative Generator' },
   { href: '/video-analyzer', label: 'Video Analyzer' },
   { href: '/editor', label: 'Editor' },
-  { href: '/flow-prompt', label: 'Gen Prompt' },
+  { href: '/flow-prompt', label: 'Flow Prompt Director' },
   { href: '/knowledge', label: 'Knowledge Base' },
   { href: '/products', label: 'Products' },
   { href: '/personas', label: 'Personas' },

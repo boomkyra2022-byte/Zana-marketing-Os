@@ -65,3 +65,43 @@ export async function getRelevantCreativeContext(
 
   return { product, persona, knowledgeText, winnersText };
 }
+
+// Added for Flow Prompt Director: same context-retrieval logic as
+// getRelevantCreativeContext, but productId is optional — the Director can
+// be used standalone with no product linked (e.g. pure brand content),
+// which the original function above doesn't support (it does a hard
+// `.eq('id', productId).single()` that throws when productId is missing).
+// Left the original function untouched to avoid any risk to existing
+// callers (idea/script/storyboard generators).
+export async function getOptionalCreativeContext(
+  supabase: SupabaseClient,
+  opts: { productId?: string | null; personaId?: string | null }
+): Promise<CreativeContext> {
+  if (opts.productId) {
+    return getRelevantCreativeContext(supabase, { productId: opts.productId, personaId: opts.personaId });
+  }
+
+  const [personaResult, knowledgeResult, winnersResult] = await Promise.all([
+    opts.personaId
+      ? supabase.from('personas').select('*').eq('id', opts.personaId).single()
+      : Promise.resolve({ data: null }),
+    supabase
+      .from('knowledge_items')
+      .select('title, type, content, product_ids, persona_ids, confidence, effective_to')
+      .eq('status', 'active')
+      .in('type', ['BRAND', 'CONTENT_RULES'])
+      .order('confidence', { ascending: false, nullsFirst: false })
+      .limit(15),
+    Promise.resolve({ data: [] as any[] })
+  ]);
+
+  const persona = personaResult.data;
+  const now = new Date();
+  const knowledgeItems = (knowledgeResult.data ?? []).filter((item: any) => !item.effective_to || new Date(item.effective_to) >= now);
+  const knowledgeText =
+    knowledgeItems.length > 0
+      ? knowledgeItems.map((k: any) => `[${k.type}] ${k.title}: ${k.content}`).join('\n')
+      : '(no product linked — no relevant knowledge base items found)';
+
+  return { product: null, persona, knowledgeText, winnersText: '(no product linked — winners not applicable)' };
+}

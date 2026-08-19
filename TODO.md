@@ -90,6 +90,23 @@ Separate top-level tab, not folded into Creative Generator, per user's request. 
 - [~] Nav item added (`components/nav-items.ts`)
 - [ ] Run migration 0009, smoke test a real generation, commit + push + deploy
 
+## Flow Prompt Director (added beyond MASTER_PROMPT_V2 scope, supersedes "Gen Prompt" tab, large explicit spec)
+"10 seconds of video = exactly 1 Google Flow Master Prompt (PART)" — replaces v1's free scene-count model. Integrated into Creative Generator (Idea/Script/Storyboard → "🎬 Flow Prompt" button) and usable standalone. Reuses/extends the existing `flow_prompts` table — old v1 rows and the old `flow-prompt-generator.ts`/v1 columns are untouched.
+- [~] `0011_flow_prompt_director.sql` — additive `ALTER TABLE flow_prompts ADD COLUMN IF NOT EXISTS` (project_name, persona_id, source_type/source_id, content_input, platform, aspect_ratio, duration_sec, prompt_count, objective, primary_goal, style, script_mode, analysis, story_flow, continuity_bible, locks, parts, version, status, updated_at) + new `flow_prompts_update` RLS policy (0009 never defined one)
+- [~] `lib/ai/context.ts` — added `getOptionalCreativeContext()` (new function; existing `getRelevantCreativeContext` untouched) for standalone use with no product linked
+- [~] `prompts/flow-prompt-director.ts` — 3 prompt builders: Content Analysis (Hook Engine + flexible Story Flow + draft Continuity/Character Bible), Master Prompt Set (all PARTs in one call, respects locked PARTs as read-only context), Regenerate Single Part (Director Command surgical edits)
+- [~] `POST /api/tools/flow-prompt/analyze` — step 1, not persisted (draft only)
+- [~] `POST /api/tools/flow-prompt/generate` — step 2, rewrote from v1; splices locked PARTs back in code (not AI-trusted); EXACT_SCRIPT word-diff fidelity warning (non-blocking)
+- [~] `POST /api/tools/flow-prompt/regenerate-part` — step 3, regenerates exactly one PART
+- [~] `POST /api/tools/flow-prompt/save` — no-AI-call save (project name, manual PART text edits, lock state)
+- [~] `components/flow-prompt-director-client.tsx` + `app/(dashboard)/flow-prompt/page.tsx` — 3-column layout: Source/Settings (left), Analysis cards + Story Flow + PART cards with Lock/Copy/Regenerate + Director Command (center), Project/Continuity Bible/History (right); Copy All + Export TXT/Markdown
+- [~] `components/creative-generator-client.tsx` — "🎬 Flow Prompt" integration button added to Idea, Script, and Storyboard cards, deep-links with source_type + source_id, pre-fills content on the Director page
+- [~] Nav label updated `Gen Prompt` → `Flow Prompt Director` (same route, no breaking change)
+- [x] Migration 0011 run on Supabase (confirmed "Success. No rows returned")
+- [ ] Smoke test the RICHTER CITY acceptance-test case (30s / Booking Form / Fast Sell-Live Commerce style / AUTO script → 3 PARTs, each individually copyable), commit + push + deploy
+
+**Explicitly deferred to Phase 2 (per user's own priority split — do not build unless asked)**: Gold Prompt Library, full Prompt Version History/rollback UI (only a `version` counter exists now), advanced Director Command types beyond free-text, export formats beyond TXT/Markdown, Creative Score integration.
+
 ## Phase 5 — QA / Deploy
 - [ ] Security: server-side keys only, RLS review, signed/private storage, Drive URL validation, filename sanitization, file size limits, timeouts, AI rate limits
 - [ ] Hide/archive any leftover V1-only routes instead of deleting (non-destructive)
