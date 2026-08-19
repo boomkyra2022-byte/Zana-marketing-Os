@@ -290,7 +290,7 @@ export function buildMasterPromptSetPrompt(ctx: GenerateCtx) {
 
 งานของคุณคือสร้าง Google Flow Master Prompt สำหรับวิดีโอความยาว ${ctx.durationSec} วินาที โดยแบ่งเป็น ${ctx.promptCount} PART ตามกฎ "10 วินาที = 1 Prompt" อย่างเคร่งครัด (PART สุดท้ายอาจสั้นกว่า 10 วินาทีเล็กน้อยถ้า ${ctx.durationSec} ไม่ใช่ทวีคูณของ 10 พอดี)
 
-${partTemplateInstructions({ aspectRatio: ctx.aspectRatio })}
+${partTemplateInstructions({ aspectRatio: ctx.aspectRatio, platform: ctx.platform })}
 
 ────────────────────
 SCENE MODE
@@ -396,7 +396,7 @@ interface RegeneratePartCtx {
 export function buildRegeneratePartPrompt(ctx: RegeneratePartCtx) {
   const system = `คุณคือ AI Video Prompt Director ของ ZANA Marketing OS กำลังแก้ไข/สร้างใหม่เฉพาะ PART ${ctx.targetPartNumber}/${ctx.totalParts} ของวิดีโอ (ช่วงเวลา ${ctx.targetTimeRange}) โดยไม่แตะ PART อื่น
 
-${partTemplateInstructions({ aspectRatio: ctx.aspectRatio })}
+${partTemplateInstructions({ aspectRatio: ctx.aspectRatio, platform: ctx.platform })}
 
 ────────────────────
 CONTENT ANALYSIS (คงเดิม)
