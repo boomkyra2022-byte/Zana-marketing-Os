@@ -162,10 +162,11 @@ export default function FlowPromptDirectorClient({ products, personas, ideas, sc
     setError('');
     setAnalyzing(true);
     try {
-      const res = await fetch('/api/tools/flow-prompt/analyze', {
+      const res = await fetch('/api/tools/flow-prompt/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'analyze',
           product_id: productId || null,
           persona_id: personaId || null,
           content_input: contentInput,
@@ -207,6 +208,7 @@ export default function FlowPromptDirectorClient({ products, personas, ideas, sc
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'generate',
           id: projectId,
           project_name: projectName || null,
           product_id: productId || null,
@@ -250,10 +252,10 @@ export default function FlowPromptDirectorClient({ products, personas, ideas, sc
     setError('');
     setRegeneratingPart(partNumber);
     try {
-      const res = await fetch('/api/tools/flow-prompt/regenerate-part', {
+      const res = await fetch('/api/tools/flow-prompt/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: projectId, part_number: partNumber, director_command: directorCommand || null })
+        body: JSON.stringify({ action: 'regenerate_part', id: projectId, part_number: partNumber, director_command: directorCommand || null })
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Regenerate failed');
@@ -280,10 +282,10 @@ export default function FlowPromptDirectorClient({ products, personas, ideas, sc
 
   async function persistManualEdit(partNumber: number) {
     if (!projectId) return;
-    await fetch('/api/tools/flow-prompt/save', {
+    await fetch('/api/tools/flow-prompt/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: projectId, parts })
+      body: JSON.stringify({ action: 'save', id: projectId, parts })
     });
   }
 
@@ -291,10 +293,17 @@ export default function FlowPromptDirectorClient({ products, personas, ideas, sc
     if (!projectId) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/tools/flow-prompt/save', {
+      const res = await fetch('/api/tools/flow-prompt/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: projectId, project_name: projectName || null, parts, locks: { parts: Array.from(lockedPartNumbers) }, status: 'SAVED' })
+        body: JSON.stringify({
+          action: 'save',
+          id: projectId,
+          project_name: projectName || null,
+          parts,
+          locks: { parts: Array.from(lockedPartNumbers) },
+          status: 'SAVED'
+        })
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Save failed');
