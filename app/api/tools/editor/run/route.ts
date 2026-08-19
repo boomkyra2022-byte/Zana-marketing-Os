@@ -6,43 +6,59 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '@/lib/supabase/server';
 import { downloadSourceVideo, SourceImportError } from '@/lib/media/source';
 import { cleanupFiles } from '@/lib/media/fs-utils';
-import { extractAudio, probeMetadata, applyDelogo, computeDelogoRegion, burnAssSubtitles, MediaProcessingError, type WatermarkCorner } from '@/lib/media/ffmpeg';
+import {
+  extractAudio,
+  probeMetadata,
+  applyDelogo,
+  computeDelogoRegion,
+  burnAssSubtitles,
+  detectSilence,
+  computeKeepSegments,
+  cutSilenceSegments,
+  MediaProcessingError,
+  type WatermarkCorner
+} from '@/lib/media/ffmpeg';
 import { uploadEditedClip } from '@/lib/supabase/storage';
-import { tamsubSilenceCut, tamsubRender, tamsubSubtitlesSrt, tamsubDewatermark, TamsubError, type TamsubResult } from '@/lib/tamsub/client';
+// Only the result-shape TYPE is still imported from the Tamsub client — no
+// Tamsub function calls remain in this route. Kept because it's just a
+// `{kind:'binary'|'text', ...}` discriminated union already used throughout
+// this file for every operation's result, not because we still call
+// Tamsub's API (see the "Retire Tamsub" note below).
+import { type TamsubResult } from '@/lib/tamsub/client';
 import { transcribeAudioWithTimestamps, callOpenAIJSON, AIProviderError } from '@/lib/ai/openai';
 import { buildPunchySubtitlePrompt, PROMPT_VERSION_PUNCHY_SUBTITLE } from '@/prompts/punchy-subtitle';
 import { repairCueCoverage, resolveCueTimestamps, resolveCueTimestampsWithWords, cuesToSrt, type RawCue, type TimedCueWithWords } from '@/lib/media/srt';
 import { buildKaraokeAss } from '@/lib/media/ass';
 
 // Editor tool (silence-cut / subtitle burn-in / SRT export / dewatermark /
-// punchy-subtitle). Most operations delegate to the Tamsub API — no local
-// ffmpeg needed for those. PUNCHY_SRT is the exception: it runs its own
-// Whisper word-timestamp + GPT cue-grouping pipeline (see
-// prompts/punchy-subtitle.ts) so we control the exact Thai segmentation
-// rules instead of relying on Tamsub's opaque captioning. Streamed NDJSON
-// progress, same pattern as /api/creative/videos/import.
+// punchy-subtitle). Everything here runs on our own ffmpeg/Whisper/GPT
+// pipeline now — no more Tamsub API dependency. Retired per explicit user
+// request ("เลิกพึ่ง Tamsub ทันที 100%") after a real Tamsub rate-limit
+// error prompted the question of whether to keep depending on their paid
+// API at all. RENDER/SUBTITLE_SRT/DEWATERMARK (the 3 remaining
+// Tamsub-backed operations) are removed from the operation enum below —
+// PUNCHY_SRT (burn_in on/off) already covers Render + SRT-only using our
+// own pipeline, DEWATERMARK_LOCAL already covers dewatermark, and
+// SILENCE_CUT below is now a from-scratch ffmpeg implementation
+// (silencedetect + trim/concat, see lib/media/ffmpeg.ts) instead of a
+// Tamsub proxy call. `lib/tamsub/client.ts` itself is left in the repo
+// untouched (not deleted) in case Tamsub is ever wanted again later.
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 const MAX_BYTES_DEFAULT = 300 * 1024 * 1024;
 
 const requestSchema = z.object({
-  operation: z.enum(['SILENCE_CUT', 'RENDER', 'SUBTITLE_SRT', 'DEWATERMARK', 'PUNCHY_SRT', 'DEWATERMARK_LOCAL']),
+  operation: z.enum(['SILENCE_CUT', 'PUNCHY_SRT', 'DEWATERMARK_LOCAL']),
   source_url: z.string().min(1),
   product_id: z.string().uuid().nullable().optional(),
-  // RENDER (Tamsub) — templateId must be one of Tamsub's real template IDs
-  // (see TAMSUB_TEMPLATE_IDS below); positionYPct/use_wallet_credit map to
-  // Tamsub's real "payload"/"source" fields (see lib/tamsub/client.ts).
-  template_id: z.string().optional(),
-  position_y_pct: z.number().min(0).max(100).optional(),
-  use_wallet_credit: z.boolean().optional(),
-  // SILENCE_CUT (Tamsub) — real field names/units are thresholdPct (%),
-  // minGapSec/bridgeSec (seconds), not dB/ms. Renamed after discovering the
-  // old threshold_db/min_silence_ms fields didn't match Tamsub's actual API
-  // at all (silently ignored, always used Tamsub's own defaults).
-  threshold_pct: z.number().min(1).max(90).optional(),
-  min_gap_sec: z.number().min(0.1).max(2).optional(),
-  bridge_sec: z.number().min(0).max(0.6).optional(),
+  // SILENCE_CUT — own ffmpeg silencedetect+cut engine now (see
+  // lib/media/ffmpeg.ts). threshold_db is a NEGATIVE dB value (native
+  // ffmpeg units, not Tamsub's old % scale); min_silence_sec/bridge_sec are
+  // seconds.
+  threshold_db: z.number().max(0).optional(),
+  min_silence_sec: z.number().min(0.1).max(5).optional(),
+  bridge_sec: z.number().min(0).max(2).optional(),
   watermark_corner: z.enum(['top-left', 'top-right', 'bottom-left', 'bottom-right']).optional(),
   watermark_size: z.enum(['small', 'medium', 'large']).optional(),
   // Styled-caption burn-in (PUNCHY_SRT only) — Tamsub-editor-style font/size/
@@ -271,6 +287,40 @@ async function runLocalDewatermark(
   }
 }
 
+// Own silence-cut engine — replaces the old Tamsub-backed SILENCE_CUT.
+// thresholdDb/minSilenceSec/bridgeSec default to reasonable values matching
+// what ffmpeg's own silencedetect examples commonly use.
+async function runLocalSilenceCut(
+  sourcePath: string,
+  runId: string,
+  tmpDir: string,
+  thresholdDb: number,
+  minSilenceSec: number,
+  bridgeSec: number
+): Promise<{ buffer: Buffer; contentType: string; removedSec: number }> {
+  const outputPath = path.join(tmpDir, `editor_${runId}_silencecut.mp4`);
+  const listPath = path.join(tmpDir, `editor_${runId}_silencecut_list.txt`);
+  const segmentPaths: string[] = [];
+  try {
+    const metadata = await probeMetadata(sourcePath);
+    const silences = await detectSilence(sourcePath, thresholdDb, minSilenceSec);
+    const keepSegments = computeKeepSegments(metadata.durationSec, silences, bridgeSec);
+
+    for (let i = 0; i < keepSegments.length; i++) {
+      segmentPaths.push(path.join(tmpDir, `editor_${runId}_silencecut_seg${i}.mp4`));
+    }
+
+    await cutSilenceSegments(sourcePath, keepSegments, segmentPaths, listPath, outputPath);
+
+    const keptSec = keepSegments.reduce((sum, s) => sum + (s.end - s.start), 0);
+    const removedSec = Math.max(0, metadata.durationSec - keptSec);
+
+    return { buffer: fs.readFileSync(outputPath), contentType: 'video/mp4', removedSec };
+  } finally {
+    cleanupFiles([...segmentPaths, listPath, outputPath]);
+  }
+}
+
 export async function POST(request: Request) {
   const supabase = createClient();
   const {
@@ -308,12 +358,9 @@ export async function POST(request: Request) {
         .insert({
           operation: input.operation,
           source_url: input.source_url,
-          template_id: input.template_id ?? null,
           options: {
-            position_y_pct: input.position_y_pct ?? null,
-            use_wallet_credit: input.use_wallet_credit ?? null,
-            threshold_pct: input.threshold_pct ?? null,
-            min_gap_sec: input.min_gap_sec ?? null,
+            threshold_db: input.threshold_db ?? null,
+            min_silence_sec: input.min_silence_sec ?? null,
             bridge_sec: input.bridge_sec ?? null,
             watermark_corner: input.watermark_corner ?? null,
             watermark_size: input.watermark_size ?? null,
@@ -350,9 +397,8 @@ export async function POST(request: Request) {
         await setStatus(job.id, 'DOWNLOADING');
         await downloadSourceVideo(input.source_url, sourcePath, { maxBytes: MAX_BYTES_DEFAULT });
 
-        // ---- PROCESSING (Tamsub for most ops; own Whisper+GPT pipeline for PUNCHY_SRT) ----
+        // ---- PROCESSING (own ffmpeg/Whisper/GPT pipeline for every operation — no Tamsub calls) ----
         await setStatus(job.id, 'PROCESSING');
-        const filename = `source_${runId}.mp4`;
 
         let result: TamsubResult;
         if (input.operation === 'PUNCHY_SRT') {
@@ -376,32 +422,17 @@ export async function POST(request: Request) {
           );
           result = { kind: 'binary', buffer: dewm.buffer, contentType: dewm.contentType, meta: { method: 'ffmpeg-delogo' } };
         } else {
-          const fileBuffer = fs.readFileSync(sourcePath);
-          switch (input.operation) {
-            case 'SILENCE_CUT':
-              result = await tamsubSilenceCut(fileBuffer, filename, {
-                thresholdPct: input.threshold_pct,
-                minGapSec: input.min_gap_sec,
-                bridgeSec: input.bridge_sec
-              });
-              break;
-            case 'RENDER':
-              result = await tamsubRender(fileBuffer, filename, {
-                templateId: input.template_id,
-                positionYPct: input.position_y_pct,
-                useWalletCredit: input.use_wallet_credit
-              });
-              break;
-            case 'SUBTITLE_SRT':
-              result = await tamsubSubtitlesSrt(fileBuffer, filename, { useWalletCredit: input.use_wallet_credit });
-              break;
-            case 'DEWATERMARK':
-              result = await tamsubDewatermark(fileBuffer, filename);
-              break;
-            default:
-              // Unreachable given the zod enum above — satisfies TS definite-assignment.
-              throw new Error(`Unsupported operation: ${input.operation}`);
-          }
+          // SILENCE_CUT — own ffmpeg silencedetect+cut engine (see
+          // lib/media/ffmpeg.ts), replaces the retired Tamsub call.
+          const cut = await runLocalSilenceCut(
+            sourcePath,
+            runId,
+            tmpDir,
+            input.threshold_db ?? -30,
+            input.min_silence_sec ?? 0.5,
+            input.bridge_sec ?? 0.3
+          );
+          result = { kind: 'binary', buffer: cut.buffer, contentType: cut.contentType, meta: { method: 'ffmpeg-silencedetect', removed_sec: cut.removedSec } };
         }
 
         // ---- UPLOADING (skip for text/SRT results — small, returned inline) ----
@@ -445,7 +476,7 @@ export async function POST(request: Request) {
         await supabase.from('editor_jobs').update({ status: 'FAILED', error: err?.message ?? 'unknown error' }).eq('id', job.id);
 
         let message = 'เกิดข้อผิดพลาดระหว่างประมวลผล';
-        if (err instanceof SourceImportError || err instanceof TamsubError || err instanceof MediaProcessingError || err instanceof AIProviderError) {
+        if (err instanceof SourceImportError || err instanceof MediaProcessingError || err instanceof AIProviderError) {
           message = err.message;
         } else if (err?.message) {
           message = err.message;

@@ -30,38 +30,26 @@ interface Props {
   recentJobs: { id: string; operation: string; status: string; result_kind: string | null; created_at: string; error: string | null }[];
 }
 
-type Operation = 'SILENCE_CUT' | 'RENDER' | 'SUBTITLE_SRT' | 'DEWATERMARK' | 'PUNCHY_SRT' | 'DEWATERMARK_LOCAL';
+// Tamsub fully retired (explicit user request: "เลิกพึ่ง Tamsub ทันที
+// 100%" after a real Tamsub rate-limit error) — every operation below now
+// runs on our own ffmpeg/Whisper/GPT pipeline, no external API/credits/rate
+// limits. RENDER, SUBTITLE_SRT (Tamsub) and DEWATERMARK (Tamsub) removed;
+// PUNCHY_SRT (burn-in on/off) already covers Render + SRT-only, and
+// DEWATERMARK_LOCAL already covers dewatermark, using our own pipeline.
+type Operation = 'SILENCE_CUT' | 'PUNCHY_SRT' | 'DEWATERMARK_LOCAL';
 
 const OPERATIONS: { value: Operation; label: string; billing: string }[] = [
-  { value: 'SILENCE_CUT', label: 'ตัดช่วงเงียบ (Silence-cut)', billing: 'ฟรีสำหรับแพ็กเกจที่เสียเงินของ Tamsub' },
-  { value: 'RENDER', label: 'ใส่ซับ / เบิร์นข้อความลงคลิป (Render)', billing: 'หัก 1 เครดิต (clip) ต่อการ render สำเร็จ 1 ครั้ง' },
-  { value: 'SUBTITLE_SRT', label: 'ถอดเป็นไฟล์ SRT อย่างเดียว (Tamsub)', billing: 'หัก 1 เครดิต (clip) ต่อไฟล์สำเร็จ 1 ครั้ง' },
+  { value: 'SILENCE_CUT', label: 'ตัดช่วงเงียบ (Silence-cut)', billing: 'ประมวลผลในเซิร์ฟเวอร์เราเอง ไม่มีค่าใช้จ่ายเพิ่ม ไม่มี rate limit' },
   {
     value: 'PUNCHY_SRT',
-    label: 'SRT แบบ Punchy — คุมกฎเอง (แนะนำสำหรับ CapCut, มีสไตล์ burn-in ให้เลือก)',
-    billing: 'ไม่ผ่าน Tamsub เลย ใช้ OpenAI + ffmpeg ของเราเอง — ไม่หัก credit ของ Tamsub'
+    label: 'ใส่ซับ / เบิร์นข้อความลงคลิป — ควบคุมกฎเอง (แนะนำสำหรับ CapCut, มีสไตล์ burn-in ให้เลือก + Live Editor)',
+    billing: 'ใช้ OpenAI + ffmpeg ของเราเอง — ไม่มีค่าใช้จ่ายเพิ่ม ไม่มี rate limit'
   },
-  { value: 'DEWATERMARK', label: 'ลบลายน้ำ AI (Dewatermark — Tamsub)', billing: 'ต้องมีสิทธิ์ฟีเจอร์นี้ในแพ็กเกจ Tamsub' },
   {
     value: 'DEWATERMARK_LOCAL',
-    label: 'ลบลายน้ำ — แบบไม่ใช้ Tamsub (เบลอมุม)',
-    billing: 'ไม่ผ่าน Tamsub เลย ประมวลผลในเซิร์ฟเวอร์เราเอง ไม่มีค่าใช้จ่ายเพิ่ม'
+    label: 'ลบลายน้ำ (เบลอมุม)',
+    billing: 'ประมวลผลในเซิร์ฟเวอร์เราเอง ไม่มีค่าใช้จ่ายเพิ่ม ไม่มี rate limit'
   }
-];
-
-// Tamsub's real /v1/renders templateId enum — confirmed against their live
-// /developers docs (2026-08-19). Free tiers include minimal + pop; the rest
-// need a premium plan or "ใช้เครดิตคลิปทันที" (useWalletCredit).
-const TAMSUB_TEMPLATE_IDS: { value: string; label: string }[] = [
-  { value: 'pop', label: 'Pop (ค่าเริ่มต้น — คำเด้งทีละคำ, ฟรี)' },
-  { value: 'minimal', label: 'Minimal (ฟรี)' },
-  { value: 'minimal-box', label: 'Minimal Box (พรีเมียม)' },
-  { value: 'focus-scale', label: 'Focus Scale (พรีเมียม)' },
-  { value: 'focus-color', label: 'Focus Color (พรีเมียม)' },
-  { value: 'tiktok-karaoke', label: 'TikTok Karaoke (พรีเมียม)' },
-  { value: 'typewriter', label: 'Typewriter (พรีเมียม)' },
-  { value: 'neon', label: 'Neon (พรีเมียม)' },
-  { value: 'wave', label: 'Wave (พรีเมียม)' }
 ];
 
 const WATERMARK_CORNERS: { value: string; label: string }[] = [
@@ -115,20 +103,11 @@ export default function EditorClient({ products, recentJobs }: Props) {
   const [uploadState, setUploadState] = useState<'idle' | 'uploading' | 'signing' | 'done' | 'error'>('idle');
   const [uploadError, setUploadError] = useState('');
   const [productId, setProductId] = useState('');
-  // RENDER (Tamsub) — templateId must be one of Tamsub's real template IDs
-  // (confirmed against their live /developers docs), positionYPct/
-  // useWalletCredit map to Tamsub's real "payload"/"source" fields. There is
-  // no "language" param in Tamsub's actual API (it auto-transcribes
-  // Thai-aware speech) — the old language selector here did nothing and was
-  // removed rather than left as a dead control.
-  const [templateId, setTemplateId] = useState('pop');
-  const [positionYPct, setPositionYPct] = useState(78);
-  const [useWalletCredit, setUseWalletCredit] = useState(false);
-  // SILENCE_CUT (Tamsub) — real field units are % of peak loudness and
-  // seconds, not dB/ms (the old threshold_db/min_silence_ms fields were
-  // silently ignored by Tamsub's actual API).
-  const [thresholdPct, setThresholdPct] = useState<number | ''>('');
-  const [minGapSec, setMinGapSec] = useState<number | ''>('');
+  // SILENCE_CUT — own ffmpeg silencedetect engine now (Tamsub retired
+  // entirely per explicit user request). thresholdDb is a NEGATIVE dB value
+  // (native ffmpeg units); minSilenceSec/bridgeSec are seconds.
+  const [thresholdDb, setThresholdDb] = useState<number | ''>('');
+  const [minSilenceSec, setMinSilenceSec] = useState<number | ''>('');
   const [bridgeSec, setBridgeSec] = useState<number | ''>('');
   const [watermarkCorner, setWatermarkCorner] = useState('bottom-right');
   const [watermarkSize, setWatermarkSize] = useState('medium');
@@ -176,11 +155,8 @@ export default function EditorClient({ products, recentJobs }: Props) {
           operation,
           source_url: sourceUrl,
           product_id: productId || null,
-          template_id: operation === 'RENDER' ? templateId || undefined : undefined,
-          position_y_pct: operation === 'RENDER' ? positionYPct : undefined,
-          use_wallet_credit: operation === 'RENDER' || operation === 'SUBTITLE_SRT' ? useWalletCredit : undefined,
-          threshold_pct: thresholdPct === '' ? undefined : thresholdPct,
-          min_gap_sec: minGapSec === '' ? undefined : minGapSec,
+          threshold_db: thresholdDb === '' ? undefined : thresholdDb,
+          min_silence_sec: minSilenceSec === '' ? undefined : minSilenceSec,
           bridge_sec: bridgeSec === '' ? undefined : bridgeSec,
           watermark_corner: watermarkCorner || undefined,
           watermark_size: watermarkSize || undefined,
@@ -476,76 +452,45 @@ export default function EditorClient({ products, recentJobs }: Props) {
             </select>
           </div>
 
-          {operation === 'RENDER' && (
-            <>
-              <div>
-                <label className="field-label">Template (Tamsub)</label>
-                <select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-                  {TAMSUB_TEMPLATE_IDS.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="field-label">ตำแหน่งแนวตั้ง (% จากด้านบน)</label>
-                <div className="flex items-center gap-3">
-                  <input type="range" min={0} max={100} step={1} value={positionYPct} onChange={(e) => setPositionYPct(Number(e.target.value))} className="flex-1" />
-                  <span className="text-sm w-12 text-right">{positionYPct}%</span>
-                </div>
-              </div>
-            </>
-          )}
-
-          {(operation === 'RENDER' || operation === 'SUBTITLE_SRT') && (
-            <div className="sm:col-span-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={useWalletCredit} onChange={(e) => setUseWalletCredit(e.target.checked)} />
-                ใช้เครดิตคลิปทันที (ปลดล็อกทุกเทมเพลต + ความยาวสูงสุด แทนรอโควต้าแพลน)
-              </label>
-            </div>
-          )}
-
           {operation === 'SILENCE_CUT' && (
             <>
               <div>
-                <label className="field-label">ระดับเสียงเงียบ (% ของเสียงดังสุดในคลิป, ไม่บังคับ — ค่าเริ่มต้น 20)</label>
+                <label className="field-label">ระดับเสียงเงียบ (dB, ค่าติดลบ, ไม่บังคับ — ค่าเริ่มต้น -30)</label>
                 <input
                   type="number"
-                  min={1}
-                  max={90}
-                  value={thresholdPct}
-                  onChange={(e) => setThresholdPct(e.target.value === '' ? '' : Number(e.target.value))}
-                  placeholder="20"
+                  max={0}
+                  value={thresholdDb}
+                  onChange={(e) => setThresholdDb(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder="-30"
                 />
+                <p className="text-xs text-gray-500 mt-1">ยิ่งใกล้ 0 ยิ่งไวต่อเสียงเบา (ตัดง่ายขึ้น) — ยิ่งติดลบมาก ยิ่งต้องเงียบจริงๆ ถึงจะนับว่าเงียบ</p>
               </div>
               <div>
-                <label className="field-label">ความยาวเงียบขั้นต่ำ (วินาที, ไม่บังคับ — ค่าเริ่มต้น 0.1)</label>
+                <label className="field-label">ความยาวเงียบขั้นต่ำ (วินาที, ไม่บังคับ — ค่าเริ่มต้น 0.5)</label>
                 <input
                   type="number"
                   min={0.1}
-                  max={2}
+                  max={5}
                   step={0.1}
-                  value={minGapSec}
-                  onChange={(e) => setMinGapSec(e.target.value === '' ? '' : Number(e.target.value))}
-                  placeholder="0.1"
+                  value={minSilenceSec}
+                  onChange={(e) => setMinSilenceSec(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder="0.5"
                 />
               </div>
               <div>
-                <label className="field-label">รวมช่วงเสียงดังสั้นๆ ที่คั่นกลาง (วินาที, ไม่บังคับ — ค่าเริ่มต้น 0)</label>
+                <label className="field-label">รวมช่วงเสียงดังสั้นๆ ที่คั่นกลาง (วินาที, ไม่บังคับ — ค่าเริ่มต้น 0.3)</label>
                 <input
                   type="number"
                   min={0}
-                  max={0.6}
+                  max={2}
                   step={0.1}
                   value={bridgeSec}
                   onChange={(e) => setBridgeSec(e.target.value === '' ? '' : Number(e.target.value))}
-                  placeholder="0"
+                  placeholder="0.3"
                 />
               </div>
               <p className="text-xs text-gray-500 sm:col-span-2">
-                ตัดเกินไป → เพิ่มความยาวเงียบขั้นต่ำ · ตัดน้อยเกินไป → ลดค่านี้ลง หรือปรับ % ระดับเสียงเงียบ
+                ตัดเกินไป → เพิ่มความยาวเงียบขั้นต่ำ หรือปรับ dB ให้ติดลบมากขึ้น · ตัดน้อยเกินไป → ลดค่าเหล่านี้ลง
               </p>
             </>
           )}

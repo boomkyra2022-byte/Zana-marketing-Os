@@ -222,7 +222,149 @@ export async function burnAssSubtitles(filePath: string, assPath: string, fontsD
   }
 }
 
+// --- Own silence-cut engine ---
+// Added to retire the Tamsub-backed SILENCE_CUT operation entirely (explicit
+// user request: "เลิกพึ่ง Tamsub ทันที 100%" — stop depending on Tamsub's
+// paid API/rate limits altogether, build our own). Standard two-pass ffmpeg
+// technique: (1) run the `silencedetect` filter against a null output to
+// find silence_start/silence_end timestamps in stderr, (2) re-encode+concat
+// just the non-silent "keep" segments. Frame-accurate cutting requires
+// putting -ss/-to AFTER -i (slower than stream-copy, but the file no longer
+// needs the source's keyframes to land exactly on silence boundaries).
+
+export interface SilenceInterval {
+  start: number;
+  end: number;
+}
+
+// `thresholdDb` is a NEGATIVE number (e.g. -30) — audio quieter than this,
+// relative to 0dB = digital full-scale, counts as silence. `minSilenceSec`
+// is how long a quiet stretch must last to count (ffmpeg's `d` param).
+export async function detectSilence(filePath: string, thresholdDb: number, minSilenceSec: number): Promise<SilenceInterval[]> {
+  if (!ffmpegPath) throw new MediaProcessingError('ไม่พบ ffmpeg บนเซิร์ฟเวอร์', 'silence_detect');
+  ensureExecutable(ffmpegPath);
+  let stderr = '';
+  try {
+    // Exits 0 normally — `-f null -` just discards the (re-encoded, unused)
+    // output; we only care about the silencedetect log lines on stderr.
+    const res = await execFileAsync(
+      ffmpegPath,
+      ['-i', filePath, '-af', `silencedetect=noise=${thresholdDb}dB:d=${minSilenceSec}`, '-f', 'null', '-'],
+      { maxBuffer: 1024 * 1024 * 20 }
+    );
+    stderr = res.stderr || '';
+  } catch (err: any) {
+    // ffmpeg with `-f null` can still exit non-zero on some inputs even
+    // though it produced usable silencedetect output on stderr — recover it
+    // from the error object rather than treating this as a hard failure.
+    if (err?.stderr) {
+      stderr = err.stderr;
+    } else {
+      throw new MediaProcessingError('ตรวจจับช่วงเงียบไม่สำเร็จ — ไฟล์อาจเสียหายหรือไม่มีเสียง', 'silence_detect');
+    }
+  }
+
+  const starts = [...stderr.matchAll(/silence_start:\s*(-?[0-9.]+)/g)].map((m) => parseFloat(m[1]));
+  const ends = [...stderr.matchAll(/silence_end:\s*(-?[0-9.]+)/g)].map((m) => parseFloat(m[1]));
+
+  const intervals: SilenceInterval[] = [];
+  for (let i = 0; i < starts.length; i++) {
+    const start = starts[i];
+    const end = ends[i]; // undefined if the clip ends while still silent
+    if (Number.isFinite(start)) {
+      intervals.push({ start, end: Number.isFinite(end) ? end : start });
+    }
+  }
+  return intervals;
+}
+
+// Merges silence intervals separated by a shorter loud blip than
+// `bridgeSec` (avoids chopping out single words surrounded by brief pauses),
+// then inverts to the "keep" ranges — padding each cut boundary inward by a
+// small fixed amount so cuts don't sound instantaneous/harsh.
+const SILENCE_CUT_PAD_SEC = 0.12;
+
+export function computeKeepSegments(durationSec: number, silences: SilenceInterval[], bridgeSec: number): SilenceInterval[] {
+  const sorted = [...silences].filter((s) => s.end > s.start).sort((a, b) => a.start - b.start);
+  const merged: SilenceInterval[] = [];
+  for (const s of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && s.start - last.end <= bridgeSec) {
+      last.end = Math.max(last.end, s.end);
+    } else {
+      merged.push({ ...s });
+    }
+  }
+
+  const keep: SilenceInterval[] = [];
+  let cursor = 0;
+  for (const s of merged) {
+    let cutStart = Math.min(s.end, s.start + SILENCE_CUT_PAD_SEC);
+    let cutEnd = Math.max(s.start, s.end - SILENCE_CUT_PAD_SEC);
+    if (cutStart > cutEnd) {
+      cutStart = cutEnd = (s.start + s.end) / 2;
+    }
+    if (cutStart > cursor) keep.push({ start: cursor, end: cutStart });
+    cursor = Math.max(cursor, cutEnd);
+  }
+  if (cursor < durationSec) keep.push({ start: cursor, end: durationSec });
+
+  return keep.filter((k) => k.end - k.start > 0.1);
+}
+
+// Extracts+re-encodes each "keep" segment, then stream-copy concatenates
+// them into one output file. `segmentPaths`/`listPath`/`outputPath` are
+// caller-built (same pattern as the other functions in this file) so this
+// module doesn't need to import node:path itself.
+export async function cutSilenceSegments(
+  filePath: string,
+  keepSegments: SilenceInterval[],
+  segmentPaths: string[],
+  listPath: string,
+  outputPath: string
+): Promise<void> {
+  if (!ffmpegPath) throw new MediaProcessingError('ไม่พบ ffmpeg บนเซิร์ฟเวอร์', 'silence_cut');
+  if (keepSegments.length === 0 || keepSegments.length !== segmentPaths.length) {
+    throw new MediaProcessingError('ไม่พบช่วงที่ไม่เงียบเหลืออยู่เลย — คลิปอาจเงียบทั้งคลิป', 'silence_cut');
+  }
+  ensureExecutable(ffmpegPath);
+
+  for (let i = 0; i < keepSegments.length; i++) {
+    const seg = keepSegments[i];
+    try {
+      await execFileAsync(
+        ffmpegPath,
+        [
+          '-y', '-i', filePath,
+          '-ss', String(seg.start), '-to', String(seg.end),
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+          '-c:a', 'aac', '-avoid_negative_ts', 'make_zero',
+          segmentPaths[i]
+        ],
+        { maxBuffer: 1024 * 1024 * 50, timeout: 250000 }
+      );
+    } catch (err: any) {
+      console.error('[silence-cut segment] failed:', err?.message, err?.stderr?.slice?.(0, 1000) || '');
+      throw new MediaProcessingError('ตัดช่วงวิดีโอไม่สำเร็จ', 'silence_cut');
+    }
+  }
+
+  const listContent = segmentPaths.map((p) => `file '${p.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`).join('\n');
+  fs.writeFileSync(listPath, listContent, 'utf8');
+
+  try {
+    await execFileAsync(
+      ffmpegPath,
+      ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', outputPath],
+      { maxBuffer: 1024 * 1024 * 50, timeout: 250000 }
+    );
+  } catch (err: any) {
+    console.error('[silence-cut concat] failed:', err?.message, err?.stderr?.slice?.(0, 1000) || '');
+    throw new MediaProcessingError('รวมช่วงวิดีโอที่ตัดแล้วไม่สำเร็จ', 'silence_cut');
+  }
+}
+
 // Re-exported from fs-utils (not redefined here) so callers that only need
-// cleanup — like the Tamsub-backed Editor route — can import it without
-// pulling ffmpeg-static/ffprobe-static into their function bundle.
+// cleanup can import it without pulling ffmpeg-static/ffprobe-static into
+// their function bundle.
 export { cleanupFiles } from './fs-utils';
