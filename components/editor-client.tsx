@@ -37,8 +37,8 @@ const OPERATIONS: { value: Operation; label: string; billing: string }[] = [
   { value: 'SUBTITLE_SRT', label: 'ถอดเป็นไฟล์ SRT อย่างเดียว (Tamsub)', billing: 'หัก 1 เครดิต (clip) ต่อไฟล์สำเร็จ 1 ครั้ง' },
   {
     value: 'PUNCHY_SRT',
-    label: 'SRT แบบ Punchy — คุมกฎเอง (แนะนำสำหรับ CapCut)',
-    billing: 'ไม่ผ่าน Tamsub เลย ใช้ OpenAI ของเราเอง — ไม่หัก credit ของ Tamsub'
+    label: 'SRT แบบ Punchy — คุมกฎเอง (แนะนำสำหรับ CapCut, มีสไตล์ burn-in ให้เลือก)',
+    billing: 'ไม่ผ่าน Tamsub เลย ใช้ OpenAI + ffmpeg ของเราเอง — ไม่หัก credit ของ Tamsub'
   },
   { value: 'DEWATERMARK', label: 'ลบลายน้ำ AI (Dewatermark — Tamsub)', billing: 'ต้องมีสิทธิ์ฟีเจอร์นี้ในแพ็กเกจ Tamsub' },
   {
@@ -60,6 +60,18 @@ const WATERMARK_SIZES: { value: string; label: string }[] = [
   { value: 'medium', label: 'กลาง' },
   { value: 'large', label: 'ใหญ่' }
 ];
+
+// Style panel for Punchy SRT burn-in — added per explicit user request to
+// replicate tamsub.com's own subtitle-styling editor (font, size,
+// words-per-line, text color, highlight color) inside our own Editor tool
+// instead of only exporting a plain .srt for manual import. Only "Kanit" is
+// listed for now because it's the only font file actually bundled in the
+// repo (assets/fonts/ — see README there); more can be added the same way
+// later without any code changes here beyond adding an entry to this list.
+const FONT_OPTIONS: { value: string; label: string }[] = [{ value: 'Kanit', label: 'Kanit' }];
+
+const TEXT_COLOR_SWATCHES = ['#FFFFFF', '#000000', '#FACC15', '#F97316', '#22C55E', '#38BDF8', '#EC4899'];
+const HIGHLIGHT_COLOR_SWATCHES = ['#FACC15', '#F97316', '#22C55E', '#38BDF8', '#EC4899', '#FFFFFF', '#000000'];
 
 const STATUS_LABELS: Record<string, string> = {
   PENDING: 'กำลังเริ่มต้น...',
@@ -94,6 +106,14 @@ export default function EditorClient({ products, recentJobs }: Props) {
   const [watermarkCorner, setWatermarkCorner] = useState('bottom-right');
   const [watermarkSize, setWatermarkSize] = useState('medium');
 
+  // Punchy SRT style panel (burn-in) state.
+  const [burnIn, setBurnIn] = useState(false);
+  const [fontName, setFontName] = useState('Kanit');
+  const [fontSizePx, setFontSizePx] = useState(56);
+  const [maxWordsPerCue, setMaxWordsPerCue] = useState(6);
+  const [textColor, setTextColor] = useState('#FFFFFF');
+  const [highlightColor, setHighlightColor] = useState('#FACC15');
+
   const [phase, setPhase] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [progressStatus, setProgressStatus] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -120,7 +140,13 @@ export default function EditorClient({ products, recentJobs }: Props) {
           threshold_db: thresholdDb === '' ? undefined : thresholdDb,
           min_silence_ms: minSilenceMs === '' ? undefined : minSilenceMs,
           watermark_corner: watermarkCorner || undefined,
-          watermark_size: watermarkSize || undefined
+          watermark_size: watermarkSize || undefined,
+          burn_in: operation === 'PUNCHY_SRT' ? burnIn : undefined,
+          font_name: operation === 'PUNCHY_SRT' && burnIn ? fontName : undefined,
+          font_size_px: operation === 'PUNCHY_SRT' && burnIn ? fontSizePx : undefined,
+          max_words_per_cue: operation === 'PUNCHY_SRT' ? maxWordsPerCue : undefined,
+          text_color: operation === 'PUNCHY_SRT' && burnIn ? textColor : undefined,
+          highlight_color: operation === 'PUNCHY_SRT' && burnIn ? highlightColor : undefined
         })
       });
 
@@ -383,6 +409,117 @@ export default function EditorClient({ products, recentJobs }: Props) {
             </>
           )}
         </div>
+
+        {operation === 'PUNCHY_SRT' && (
+          <div className="card p-4 bg-surface space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-sm">สไตล์ซับ (แบบ tamsub.com)</h3>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={burnIn} onChange={(e) => setBurnIn(e.target.checked)} />
+                เผาซับลงวิดีโอเลย (Burn-in)
+              </label>
+            </div>
+
+            <div>
+              <label className="field-label">จำนวนคำต่อบรรทัด</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={2}
+                  max={10}
+                  step={1}
+                  value={maxWordsPerCue}
+                  onChange={(e) => setMaxWordsPerCue(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <span className="text-sm w-6 text-right">{maxWordsPerCue}</span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">ใช้คุมความยาว cue ทั้งแบบไฟล์ .srt เฉยๆ และแบบ burn-in</p>
+            </div>
+
+            {burnIn && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="field-label">ฟอนต์</label>
+                    <select value={fontName} onChange={(e) => setFontName(e.target.value)}>
+                      {FONT_OPTIONS.map((f) => (
+                        <option key={f.value} value={f.value}>
+                          {f.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="field-label">ขนาดตัวอักษร (px)</label>
+                    <div className="flex items-center gap-3">
+                      <input type="range" min={16} max={160} step={2} value={fontSizePx} onChange={(e) => setFontSizePx(Number(e.target.value))} className="flex-1" />
+                      <span className="text-sm w-10 text-right">{fontSizePx}px</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Cosmetic only — loads the real Kanit webfont so the preview below matches
+                    what gets burned into the video. Doesn't affect the server-side render,
+                    which uses the .ttf file in assets/fonts/. */}
+                <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;700&display=swap" />
+                <div
+                  className="rounded-lg p-4 flex items-center justify-center bg-navy"
+                  style={{ minHeight: 80 }}
+                >
+                  <span style={{ fontFamily: fontName, fontSize: Math.min(fontSizePx, 48), color: textColor }}>
+                    ก ข ค ง สวัสดี <span style={{ color: highlightColor }}>AaBbCc</span> 123
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="field-label">สีตัวอักษร</label>
+                    <div className="flex gap-1.5 flex-wrap items-center">
+                      {TEXT_COLOR_SWATCHES.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setTextColor(c)}
+                          className="w-6 h-6 rounded-full border-2"
+                          style={{ background: c, borderColor: textColor === c ? '#2563eb' : 'transparent' }}
+                          aria-label={c}
+                        />
+                      ))}
+                      <input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} className="!w-8 !h-8 !p-0" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="field-label">สี Highlight (คำที่กำลังพูด)</label>
+                    <div className="flex gap-1.5 flex-wrap items-center">
+                      {HIGHLIGHT_COLOR_SWATCHES.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setHighlightColor(c)}
+                          className="w-6 h-6 rounded-full border-2"
+                          style={{ background: c, borderColor: highlightColor === c ? '#2563eb' : 'transparent' }}
+                          aria-label={c}
+                        />
+                      ))}
+                      <input type="color" value={highlightColor} onChange={(e) => setHighlightColor(e.target.value)} className="!w-8 !h-8 !p-0" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 flex-wrap text-xs">
+                  <span className="px-2 py-1 rounded-full bg-green-50 text-green-700 border border-green-200">✓ ชิดต่อเนื่อง ไม่เว้นช่วงเงียบ (บังคับอยู่แล้วในระบบ)</span>
+                  <span className="px-2 py-1 rounded-full bg-green-50 text-green-700 border border-green-200">✓ ไม่เว้นวรรคระหว่างคำไทยแบบผิดหลัก (บังคับอยู่แล้วในระบบ)</span>
+                </div>
+
+                <p className="text-xs text-gray-500 bg-white rounded-lg p-3 border border-border">
+                  ⚠ ฟีเจอร์นี้เผาซับลงวิดีโอจริงด้วย ffmpeg — ต้องมีไฟล์ฟอนต์ Kanit วางไว้ในเซิร์ฟเวอร์ก่อน (ดู <code>assets/fonts/README.md</code>)
+                  และยังไม่เคยทดสอบจริงบน production — ถ้าล้มเหลวให้ลองปิด Burn-in แล้วใช้ไฟล์ .srt ธรรมดาไปก่อน
+                </p>
+              </>
+            )}
+          </div>
+        )}
 
         <button className="btn-primary" disabled={!sourceUrl || phase === 'running'} onClick={handleRun}>
           {phase === 'running' ? 'กำลังประมวลผล...' : 'Run'}

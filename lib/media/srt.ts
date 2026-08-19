@@ -110,6 +110,74 @@ export function resolveCueTimestamps(words: TimedWord[], cues: RawCue[], correct
     .sort((a, b) => a.start - b.start);
 }
 
+// Added for styled subtitle burn-in (Tamsub-style font/size/color/highlight
+// picker, per-word karaoke highlight). Same word-index -> real-timestamp
+// grounding as resolveCueTimestamps above, but keeps each word's individual
+// timing instead of collapsing to one start/end per cue, so the ASS
+// generator (lib/media/ass.ts) can highlight one word at a time as it's
+// spoken. Spacing uses the identical Thai/Latin rule as joinWordsThai,
+// applied per-token so concatenating all words[].text reproduces the exact
+// same string resolveCueTimestamps() would have produced.
+export interface KaraokeWord {
+  text: string; // includes its own leading space when one is needed
+  start: number; // absolute seconds, real Whisper word timing
+  end: number; // absolute seconds, real Whisper word timing
+  durationCs: number; // centiseconds (end-start), kept for convenience
+}
+
+export interface TimedCueWithWords extends TimedCue {
+  words: KaraokeWord[];
+}
+
+function buildSpacedTokens(tokens: string[]): string[] {
+  const out: string[] = [];
+  let prevChar = '';
+  for (const raw of tokens) {
+    const w = raw.trim();
+    if (!w) continue;
+    const firstChar = w[0];
+    let piece = w;
+    if (out.length > 0) {
+      const prevIsThai = THAI_CHAR_RE.test(prevChar);
+      const curIsThai = THAI_CHAR_RE.test(firstChar);
+      if (!(prevIsThai && curIsThai)) piece = ` ${piece}`;
+    }
+    out.push(piece);
+    prevChar = w[w.length - 1];
+  }
+  return out;
+}
+
+export function resolveCueTimestampsWithWords(words: TimedWord[], cues: RawCue[], corrections: WordCorrection[] = []): TimedCueWithWords[] {
+  const correctionMap = new Map<number, string>();
+  for (const c of corrections) {
+    if (Number.isFinite(c.word_index) && typeof c.corrected_word === 'string' && c.corrected_word.trim()) {
+      correctionMap.set(c.word_index, c.corrected_word.trim());
+    }
+  }
+
+  return cues
+    .map((c) => {
+      const slice = words.slice(c.start_word_index, c.end_word_index + 1);
+      const rawTokens = slice.map((w, i) => correctionMap.get(c.start_word_index + i) ?? w.word);
+      const spacedTokens = buildSpacedTokens(rawTokens);
+      const karaokeWords: KaraokeWord[] = spacedTokens.map((text, i) => {
+        const src = slice[i];
+        const wStart = src?.start ?? 0;
+        const wEnd = src?.end ?? wStart;
+        return { text, start: wStart, end: wEnd, durationCs: Math.max(1, Math.round((wEnd - wStart) * 100)) };
+      });
+      return {
+        start: words[c.start_word_index]?.start ?? 0,
+        end: words[c.end_word_index]?.end ?? 0,
+        text: spacedTokens.join(''),
+        words: karaokeWords
+      };
+    })
+    .filter((c) => c.text.length > 0 && c.end > c.start)
+    .sort((a, b) => a.start - b.start);
+}
+
 function formatSrtTimestamp(seconds: number): string {
   const totalMs = Math.max(0, Math.round(seconds * 1000));
   const ms = totalMs % 1000;

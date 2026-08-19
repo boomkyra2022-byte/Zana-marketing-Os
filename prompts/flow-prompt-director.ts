@@ -18,7 +18,7 @@
 //   2. buildMasterPromptSetPrompt — Generate all PARTs in one call (respects locked parts passed through as fixed context)
 //   3. buildRegeneratePartPrompt  — Regenerate a single PART only (Director Command surgical edits)
 
-export const PROMPT_VERSION_FLOW_DIRECTOR = 'flow-prompt-director-v2';
+export const PROMPT_VERSION_FLOW_DIRECTOR = 'flow-prompt-director-v3';
 
 export interface FlowStoryFlowStep {
   step: string;
@@ -61,19 +61,27 @@ export interface FlowSceneDetail {
   transition: string;
 }
 
+export interface FlowEditingStyle {
+  pacing: string;
+  typography: string;
+  sfx: string;
+}
+
 export interface FlowPromptPart {
   part_number: number;
   time_range: string;
-  part_purpose: string;
+  part_purpose: string; // rendered as the "VIDEO OBJECTIVE" header line
+  emotion: string; // v3: added after user feedback comparing against a gold-standard example
+  micro_cta: string; // v3: this PART's own CTA line (not necessarily the final sales CTA)
   scenes: FlowSceneDetail[];
   full_voice_over: string;
   on_screen_text: string[];
-  editing_style: string;
-  retention_device: string;
-  continuity_note: string;
-  negative_instructions: string;
-  final_feel: string;
-  handoff_to_next: string;
+  editing_style: FlowEditingStyle; // v3: structured (Pacing/Typography/SFX) instead of one free paragraph
+  retention_device: string; // internal only — informs generation, not printed as its own section anymore
+  continuity_note: string; // rendered as the single-line CONTINUITY section
+  negative_instructions: string; // rendered as a short list, not a paragraph
+  final_feel: string; // internal only — not printed as its own section anymore
+  handoff_to_next: string; // internal only, never printed
   prompt_text: string;
 }
 
@@ -211,21 +219,64 @@ interface GenerateCtx {
   directorCommand?: string;
 }
 
-function partTemplateInstructions(ctx: { aspectRatio: string }) {
-  return `แต่ละ PART (prompt_text) ต้องเป็น Standalone Prompt ที่สมบูรณ์ พร้อม copy ไปวางใน Google Flow ได้ทันที ห้ามอ้างอิง "เหมือน PART ก่อนหน้า" หรือ "ต่อจากฉากที่แล้ว" เด็ดขาด เพราะ Google Flow สร้างแต่ละ Prompt แยกกันไม่มีความจำ ต้องเขียน CONTINUITY / CHARACTER / PRODUCT REFERENCE ซ้ำให้ครบทุก PART
+// v3: rewritten to match a concrete gold-standard example the user supplied
+// after real-world testing ("อันนี้คือ Prompt ที่ดี ควรใช้เป็นตัวอย่างให้ Gen
+// มาแบบนี้"). The earlier version (dedicated PRODUCT REFERENCE / CHARACTER
+// BIBLE / VISUAL CONTINUITY / RETENTION DEVICE / FINAL FEEL sections in
+// every PART) tested worse in practice — bloated and repetitive before the
+// reader even reaches the scenes. This version keeps the SAME underlying
+// guarantee (every PART is a standalone prompt, continuity never assumed)
+// but folds all "must stay consistent" info into ONE compact CONTINUITY
+// line at the end, matching the example's structure exactly.
+function partTemplateInstructions(ctx: { aspectRatio: string; platform: string }) {
+  return `แต่ละ PART (prompt_text) ต้องเป็น Standalone Prompt ที่สมบูรณ์ พร้อม copy ไปวางใน Google Flow ได้ทันที ห้ามอ้างอิง "เหมือน PART ก่อนหน้า" หรือ "ต่อจากฉากที่แล้ว" เด็ดขาด เพราะ Google Flow สร้างแต่ละ Prompt แยกกันไม่มีความจำ — ความต่อเนื่องทั้งหมด (สินค้า/ตัวละคร/โทนสี/สไตล์ภาพ) ต้องถูกอัดรวมเป็น CONTINUITY บรรทัดเดียวท้าย prompt เท่านั้น ห้ามแยกเป็นหลายหัวข้อยาวๆ
 
-โครงสร้างของ prompt_text ต้องมีหัวข้อครบตามนี้ (เขียนรวมเป็นข้อความเดียวที่อ่านลื่นและพร้อมใช้งานจริง ไม่ใช่แค่ list):
-1. บรรทัดแรก: ระบุ "PART {n}/{total}" ช่วงเวลา ({time_range}) และบอกว่าให้สร้าง/ตัดต่อวิดีโอแนวตั้ง ${ctx.aspectRatio} ความยาวช่วงนี้ 10 วินาที เป็นส่วนที่ {n} จากทั้งหมด {total} ส่วน พร้อมหน้าที่ของ PART นี้
-2. PRODUCT REFERENCE — ชื่อสินค้า จุดขายที่อนุญาต ข้อห้ามพูด (คัดลอกมาจาก Continuity Bible ทุกครั้ง ห้ามแก้)
-3. CHARACTER BIBLE — รูปลักษณ์ เสื้อผ้า น้ำเสียง กฎความต่อเนื่อง (คัดลอกมาจาก Continuity Bible ทุกครั้ง)
-4. VISUAL CONTINUITY — typography style, motion language, color treatment, editing energy (คัดลอกมาจาก Continuity Bible ทุกครั้ง)
-5. SCENE BREAKDOWN ของ PART นี้ (2-4 scene) แต่ละ scene ระบุ: TIME / PURPOSE / VISUAL / SUBJECT / ACTION / CAMERA / MOTION GRAPHIC / ON-SCREEN TEXT / VOICE OVER / SOUND / TRANSITION — ต้องเจาะจงเสมอ ห้ามเขียนคลุมเครือแบบ "เพิ่มโมชั่นกราฟิก" ต้องบอกว่าเป็นกราฟิกอะไร ปรากฏตอนไหน ทำหน้าที่อะไร
-6. FULL VOICE OVER ของ PART นี้ทั้งหมด (คำพูดจริงที่จะได้ยิน) — ${VOICE_OVER_PACING_RULE}
-7. ON-SCREEN TEXT ที่จะปรากฏจริงในวิดีโอช่วงนี้ (Small Header / Main Headline / Supporting / Keyword / CTA — เลือกเฉพาะที่เหมาะสม)
-8. RETENTION DEVICE ของ PART นี้ (Open Loop, Pattern Interrupt, Number, Before/After, Reveal, Contrast ฯลฯ)
-9. EDITING STYLE / PACING ของ PART นี้
-10. NEGATIVE INSTRUCTIONS: ${GUARDRAILS}
-11. FINAL FEEL — ความรู้สึกโดยรวมที่ผู้ชมควรได้รับหลังดู PART นี้จบ`;
+โครงสร้างของ prompt_text ต้องเรียงตามนี้เป๊ะๆ (รูปแบบนี้ทดสอบจริงแล้วว่าได้ผลลัพธ์ดีที่สุด — กระชับ ไม่ยัดหัวข้อซ้ำซ้อน ห้ามเพิ่มหัวข้ออื่นนอกจากนี้):
+
+MASTER PROMPT — Google Flow
+PART: {n}/{total}
+VIDEO OBJECTIVE: {วลีสั้น 2-6 คำบอกเป้าหมายเชิงกลยุทธ์ของ PART นี้โดยเฉพาะ เช่น "Platform Intelligence & Deep-dive", "Hook & Problem Awareness" — ไม่ใช่แค่ก็อป Objective รวมของทั้งวิดีโอ}
+PLATFORM: ${ctx.platform} (${ctx.aspectRatio})
+DURATION: 10 SEC
+ASPECT RATIO: ${ctx.aspectRatio}
+CORE MESSAGE: {ข้อความหลักของทั้งวิดีโอ — เหมือนกันทุก PART}
+TARGET: {กลุ่มเป้าหมาย — เหมือนกันทุก PART}
+EMOTION: {อารมณ์ที่ PART นี้ต้องการสื่อ 2-4 คำ เช่น "Strategic Insight, Clarity"}
+SELLING POINT: {จุดขาย/ประโยชน์ที่ PART นี้เน้นโดยเฉพาะ}
+CTA: {สิ่งที่อยากให้ผู้ชม "รู้สึกหรือทำ" หลังดู PART นี้จบ — ไม่จำเป็นต้องเป็น CTA ขายของเสมอไป โดยเฉพาะ PART ต้นๆ อาจเป็น CTA เชิง engagement}
+
+SCENE 1 ({time_range ของ scene นี้})
+TIME: {time_range}
+PURPOSE: {หน้าที่ของ scene นี้}
+VISUAL: {บรรยายภาพอย่างเจาะจง ห้ามคลุมเครือ}
+CAMERA: {shot + movement}
+ACTION: {สิ่งที่เกิดขึ้น/เคลื่อนไหวในเฟรม}
+MOTION GRAPHIC: {กราฟิกที่ปรากฏถ้ามี — ต้องบอกว่าเป็นกราฟิกอะไร ปรากฏตอนไหน ทำหน้าที่อะไร ห้ามเขียนลอยๆ ว่า "เพิ่มโมชั่นกราฟิก"}
+ON-SCREEN TEXT: {ข้อความบนจอของ scene นี้}
+VOICE OVER: "{ประโยคที่พูดช่วงนี้ — ต้องเป็นส่วนหนึ่งของ FULL VOICE OVER ด้านล่างเป๊ะๆ ไม่ใช่คำอื่น}"
+SOUND: {sound design}
+TRANSITION: {การเปลี่ยนไป scene ถัดไป}
+
+(ทำซ้ำหัวข้อ "SCENE {n} ({time_range})" แบบเดียวกันสำหรับทุก scene ใน PART นี้ ตามจำนวนที่กำหนดใน SCENE MODE ด้านล่าง)
+
+FULL VOICE OVER (PART {n})
+"{Voice Over เต็มของ PART นี้ทั้งหมด}" — ${VOICE_OVER_PACING_RULE}
+
+ON-SCREEN TEXT (PART {n})
+{list ข้อความบนจอทั้งหมดของ PART นี้ บรรทัดละ 1 รายการ}
+
+EDITING STYLE
+Pacing: {จังหวะการตัดต่อของ PART นี้}
+Typography: {สไตล์ตัวอักษร/kinetic typography ของ PART นี้}
+SFX: {แนวเสียงประกอบของ PART นี้}
+
+CONTINUITY
+{1 บรรทัดเดียว กระชับแบบตัวอย่าง "Consistent Dark Slate UI palette (Hex #0B0E14) with TikTok Cyan and White accents." — รวมทุกอย่างที่ต้องเหมือนกันทุก PART ไว้ในบรรทัดนี้: ถ้ามีสินค้า/ตัวละครต้องระบุชื่อ/ลักษณะที่ต้องคงเดิม (มาจาก Continuity Bible ด้านล่าง) รวมกับโทนสี/พาเลตหลัก/สไตล์ภาพ}
+
+NEGATIVE INSTRUCTIONS
+{list สั้นๆ คั่นด้วยจุลภาค 2-5 ข้อ เจาะจงกับ PART นี้ ผสมกับ guardrail มาตรฐานที่เกี่ยวข้องที่สุด (ไม่ต้องยกมาทั้งหมด) — ห้ามเขียนเป็นย่อหน้ายาว}
+
+ห้ามใส่หัวข้อ PRODUCT REFERENCE, CHARACTER BIBLE, RETENTION DEVICE, หรือ FINAL FEEL แยกเป็นหัวข้อของตัวเองเด็ดขาด — ข้อมูลพวกนี้ให้แทรกเข้า CONTINUITY หรือรายละเอียดของแต่ละ scene แทน`;
 }
 
 export function buildMasterPromptSetPrompt(ctx: GenerateCtx) {

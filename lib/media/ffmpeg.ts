@@ -188,6 +188,40 @@ export function computeDelogoRegion(
   return { x: Math.max(0, x), y: Math.max(0, y), w, h };
 }
 
+function escapeFilterPath(p: string): string {
+  return p.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'");
+}
+
+// Burns a styled .ass subtitle file (per-word highlight, custom font/size/
+// colors — see lib/media/ass.ts) directly onto the video. Added so Punchy
+// SRT can offer a Tamsub-style "burn styled captions into the video" option
+// instead of only ever exporting a plain .srt for manual import. Relies on
+// ffmpeg's `subtitles` filter, which needs libass support built into the
+// ffmpeg binary — ffmpeg-static's build includes it, but this is the one
+// part of this feature that's genuinely unverified until tested live on
+// Vercel (flagged honestly rather than assumed). `fontsDir` must point at a
+// folder containing the actual font file(s) referenced by the .ass Style
+// line — Vercel's serverless filesystem has no system fonts installed, so
+// without a real bundled font file, Thai text would render as tofu/boxes.
+export async function burnAssSubtitles(filePath: string, assPath: string, fontsDir: string, destPath: string): Promise<void> {
+  if (!ffmpegPath) throw new MediaProcessingError('ไม่พบ ffmpeg บนเซิร์ฟเวอร์', 'subtitle_burn');
+  ensureExecutable(ffmpegPath);
+  const filter = `subtitles='${escapeFilterPath(assPath)}':fontsdir='${escapeFilterPath(fontsDir)}'`;
+  try {
+    await execFileAsync(
+      ffmpegPath,
+      ['-y', '-i', filePath, '-vf', filter, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-c:a', 'copy', destPath],
+      { maxBuffer: 1024 * 1024 * 50, timeout: 250000 }
+    );
+  } catch (err: any) {
+    console.error('[subtitles burn] failed:', err?.message, err?.stderr?.slice?.(0, 1500) || '');
+    throw new MediaProcessingError(
+      'เผาซับสไตล์ลงวิดีโอไม่สำเร็จ — อาจเป็นเพราะ ffmpeg build นี้ไม่รองรับ libass (subtitles filter) หรือไฟล์ฟอนต์ที่เลือกไม่มีในเซิร์ฟเวอร์',
+      'subtitle_burn'
+    );
+  }
+}
+
 // Re-exported from fs-utils (not redefined here) so callers that only need
 // cleanup — like the Tamsub-backed Editor route — can import it without
 // pulling ffmpeg-static/ffprobe-static into their function bundle.

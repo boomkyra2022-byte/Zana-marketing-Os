@@ -6,12 +6,13 @@ import { randomUUID } from 'node:crypto';
 import { createClient } from '@/lib/supabase/server';
 import { downloadSourceVideo, SourceImportError } from '@/lib/media/source';
 import { cleanupFiles } from '@/lib/media/fs-utils';
-import { extractAudio, probeMetadata, applyDelogo, computeDelogoRegion, MediaProcessingError, type WatermarkCorner } from '@/lib/media/ffmpeg';
+import { extractAudio, probeMetadata, applyDelogo, computeDelogoRegion, burnAssSubtitles, MediaProcessingError, type WatermarkCorner } from '@/lib/media/ffmpeg';
 import { uploadEditedClip } from '@/lib/supabase/storage';
 import { tamsubSilenceCut, tamsubRender, tamsubSubtitlesSrt, tamsubDewatermark, TamsubError, type TamsubResult } from '@/lib/tamsub/client';
 import { transcribeAudioWithTimestamps, callOpenAIJSON, AIProviderError } from '@/lib/ai/openai';
 import { buildPunchySubtitlePrompt, PROMPT_VERSION_PUNCHY_SUBTITLE } from '@/prompts/punchy-subtitle';
-import { repairCueCoverage, resolveCueTimestamps, cuesToSrt, type RawCue } from '@/lib/media/srt';
+import { repairCueCoverage, resolveCueTimestamps, resolveCueTimestampsWithWords, cuesToSrt, type RawCue } from '@/lib/media/srt';
+import { buildKaraokeAss } from '@/lib/media/ass';
 
 // Editor tool (silence-cut / subtitle burn-in / SRT export / dewatermark /
 // punchy-subtitle). Most operations delegate to the Tamsub API — no local
@@ -34,7 +35,15 @@ const requestSchema = z.object({
   threshold_db: z.number().optional(),
   min_silence_ms: z.number().optional(),
   watermark_corner: z.enum(['top-left', 'top-right', 'bottom-left', 'bottom-right']).optional(),
-  watermark_size: z.enum(['small', 'medium', 'large']).optional()
+  watermark_size: z.enum(['small', 'medium', 'large']).optional(),
+  // Styled-caption burn-in (PUNCHY_SRT only) — Tamsub-editor-style font/size/
+  // words-per-line/color/highlight picker, added per explicit user request.
+  burn_in: z.boolean().optional(),
+  font_name: z.string().optional(),
+  font_size_px: z.number().int().min(16).max(160).optional(),
+  max_words_per_cue: z.number().int().min(2).max(10).optional(),
+  text_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  highlight_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional()
 });
 
 const punchyCuesSchema = z.object({
@@ -54,14 +63,26 @@ const punchyCuesSchema = z.object({
     .optional()
 });
 
+interface PunchyStyleOptions {
+  burnIn: boolean;
+  fontName?: string;
+  fontSizePx?: number;
+  maxWordsPerCue: number;
+  textColorHex?: string;
+  highlightColorHex?: string;
+}
+
 async function runPunchySubtitle(
   sourcePath: string,
   runId: string,
   tmpDir: string,
   productId: string | null,
-  supabase: ReturnType<typeof createClient>
-): Promise<{ text: string }> {
+  supabase: ReturnType<typeof createClient>,
+  style: PunchyStyleOptions
+): Promise<TamsubResult> {
   const audioPath = path.join(tmpDir, `editor_${runId}_audio.mp3`);
+  const assPath = path.join(tmpDir, `editor_${runId}_captions.ass`);
+  const burnedPath = path.join(tmpDir, `editor_${runId}_burned.mp4`);
   try {
     const metadata = await probeMetadata(sourcePath);
     await extractAudio(sourcePath, audioPath);
@@ -82,7 +103,8 @@ async function runPunchySubtitle(
       durationSec: metadata.durationSec,
       productName,
       brand,
-      knownTerms: []
+      knownTerms: [],
+      maxWordsPerCue: style.maxWordsPerCue
     });
 
     const { text: aiText } = await callOpenAIJSON({ system, user: userPrompt, temperature: 0.2, timeoutMs: 120000 });
@@ -102,14 +124,57 @@ async function runPunchySubtitle(
     }
 
     const repaired = repairCueCoverage(words, rawCues);
-    const timedCues = resolveCueTimestamps(words, repaired, corrections);
-    if (timedCues.length === 0) {
-      throw new AIProviderError('สร้าง subtitle ไม่สำเร็จ — AI ไม่ได้คืนค่า cue ที่ใช้ได้', 502);
+
+    if (!style.burnIn) {
+      const timedCues = resolveCueTimestamps(words, repaired, corrections);
+      if (timedCues.length === 0) {
+        throw new AIProviderError('สร้าง subtitle ไม่สำเร็จ — AI ไม่ได้คืนค่า cue ที่ใช้ได้', 502);
+      }
+      return { kind: 'text', text: cuesToSrt(timedCues), meta: { prompt_version: PROMPT_VERSION_PUNCHY_SUBTITLE } };
     }
 
-    return { text: cuesToSrt(timedCues) };
+    // Styled burn-in path — Tamsub-editor-style font/size/color/highlight
+    // picker, added per explicit user request ("ยังจำตัวทำซับได้ไหม จาก
+    // tamsub.com... สร้าง UI แบบนี้ในเครื่องมือ Editor ของเราเอง"). Same
+    // word-index -> real-timestamp grounding as the plain-SRT path; only the
+    // output format changes (styled .ass burned onto the video instead of a
+    // plain .srt file).
+    const timedCuesWithWords = resolveCueTimestampsWithWords(words, repaired, corrections);
+    if (timedCuesWithWords.length === 0) {
+      throw new AIProviderError('สร้าง subtitle ไม่สำเร็จ — AI ไม่ได้คืนค่า cue ที่ใช้ได้', 502);
+    }
+    if (!metadata.width || !metadata.height) {
+      throw new MediaProcessingError('อ่านขนาดวิดีโอไม่ได้ — ไม่สามารถวางตำแหน่งซับสไตล์ได้', 'subtitle_burn');
+    }
+
+    const assContent = buildKaraokeAss(timedCuesWithWords, {
+      fontName: style.fontName ?? 'Kanit',
+      fontSizePx: style.fontSizePx ?? 56,
+      textColorHex: style.textColorHex ?? '#FFFFFF',
+      highlightColorHex: style.highlightColorHex ?? '#FACC15',
+      videoWidth: metadata.width,
+      videoHeight: metadata.height
+    });
+    fs.writeFileSync(assPath, assContent, 'utf8');
+
+    // Bundled font folder — must contain the actual .ttf/.otf files matching
+    // fontName (see assets/fonts/README.md). Vercel's serverless filesystem
+    // has no system fonts installed, so without a real font file here Thai
+    // text would render as tofu/boxes.
+    const fontsDir = path.join(process.cwd(), 'assets', 'fonts');
+    await burnAssSubtitles(sourcePath, assPath, fontsDir, burnedPath);
+
+    return {
+      kind: 'binary',
+      buffer: fs.readFileSync(burnedPath),
+      contentType: 'video/mp4',
+      meta: {
+        prompt_version: PROMPT_VERSION_PUNCHY_SUBTITLE,
+        style: { fontName: style.fontName ?? 'Kanit', fontSizePx: style.fontSizePx ?? 56, textColorHex: style.textColorHex ?? '#FFFFFF', highlightColorHex: style.highlightColorHex ?? '#FACC15' }
+      }
+    };
   } finally {
-    cleanupFiles([audioPath]);
+    cleanupFiles([audioPath, assPath, burnedPath]);
   }
 }
 
@@ -177,7 +242,13 @@ export async function POST(request: Request) {
             threshold_db: input.threshold_db ?? null,
             min_silence_ms: input.min_silence_ms ?? null,
             watermark_corner: input.watermark_corner ?? null,
-            watermark_size: input.watermark_size ?? null
+            watermark_size: input.watermark_size ?? null,
+            burn_in: input.burn_in ?? null,
+            font_name: input.font_name ?? null,
+            font_size_px: input.font_size_px ?? null,
+            max_words_per_cue: input.max_words_per_cue ?? null,
+            text_color: input.text_color ?? null,
+            highlight_color: input.highlight_color ?? null
           },
           product_id: input.product_id ?? null,
           status: 'PENDING',
@@ -209,8 +280,14 @@ export async function POST(request: Request) {
 
         let result: TamsubResult;
         if (input.operation === 'PUNCHY_SRT') {
-          const punchy = await runPunchySubtitle(sourcePath, runId, tmpDir, input.product_id ?? null, supabase);
-          result = { kind: 'text', text: punchy.text, meta: { prompt_version: PROMPT_VERSION_PUNCHY_SUBTITLE } };
+          result = await runPunchySubtitle(sourcePath, runId, tmpDir, input.product_id ?? null, supabase, {
+            burnIn: input.burn_in ?? false,
+            fontName: input.font_name,
+            fontSizePx: input.font_size_px,
+            maxWordsPerCue: input.max_words_per_cue ?? 6,
+            textColorHex: input.text_color,
+            highlightColorHex: input.highlight_color
+          });
         } else if (input.operation === 'DEWATERMARK_LOCAL') {
           const dewm = await runLocalDewatermark(
             sourcePath,

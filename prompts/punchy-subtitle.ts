@@ -24,6 +24,7 @@ export interface PunchySubtitleContext {
   productName: string | null;
   brand: string | null;
   knownTerms: string[]; // English/product terms likely to appear, for correction
+  maxWordsPerCue?: number; // Tamsub-style "words per line" control, default 6
 }
 
 export function buildPunchySubtitlePrompt(ctx: PunchySubtitleContext) {
@@ -35,7 +36,7 @@ JOB 1 — Group words into short, punchy subtitle cues by WORD INDEX ONLY (you n
 1. Every word must belong to exactly one cue — no duplicates, no dropped words, no gaps: cue N's end_word_index + 1 must equal cue N+1's start_word_index, starting at word 0 and ending at the last word index.
 2. Never break a cue in a position that destroys meaning (e.g. never split a compound noun or a name across two cues).
 3. Short Thai connector words (ของ, ที่, มัน, ที่มัน, ก็, แล้ว, นะ, ค่ะ, ครับ, etc.) must stay in the SAME cue as the neighboring content word — never alone at the start/end of a cue.
-4. Prefer short, punchy groupings (roughly 2-6 words per cue) over long sentences — this is fast-paced social video captioning — EXCEPT where rules 2/3 require keeping words together.
+4. Prefer short, punchy groupings (roughly 2-${ctx.maxWordsPerCue ?? 6} words per cue, never more than ${ctx.maxWordsPerCue ?? 6}) over long sentences — this is fast-paced social video captioning — EXCEPT where rules 2/3 require keeping words together (in that rare case slightly exceeding the max is fine).
 
 JOB 2 — Flag ONLY obvious mis-transcriptions of the specific product name, brand, or English/technical terms listed below (Whisper commonly mis-hears these). For each word index that is clearly a mangled version of one of these known terms, return a correction. Do NOT "correct" anything else — no general rewriting, no fixing filler words, no rephrasing. If nothing needs correction, return an empty corrections array.
 

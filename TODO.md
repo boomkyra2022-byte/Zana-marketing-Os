@@ -104,6 +104,18 @@ Separate top-level tab, not folded into Creative Generator, per user's request. 
 
 **Explicitly deferred to Phase 2 (per user's own priority split — do not build unless asked)**: Gold Prompt Library, full Prompt Version History/rollback UI (only a `version` counter exists now), advanced Director Command types beyond free-text, export formats beyond TXT/Markdown, Creative Score integration.
 
+## Punchy SRT styled burn-in (added, explicit user request — replicate tamsub.com's own subtitle-styling editor)
+User showed a screenshot of tamsub.com's post-upload editor (font picker w/ preview, size slider, words-per-line, text color, highlight color) and asked for the same inside our own Editor tool rather than relying on Tamsub's own editor. No new migration — reuses the existing PUNCHY_SRT operation + `editor_jobs.options` jsonb, just adds a `burn_in` branch.
+- [~] `lib/media/srt.ts` — added `resolveCueTimestampsWithWords()` (additive, existing `resolveCueTimestamps` untouched) — keeps each word's real Whisper start/end instead of collapsing to one start/end per cue, needed for per-word highlight timing
+- [~] `prompts/punchy-subtitle.ts` — added optional `maxWordsPerCue` (Tamsub-style "words per line" control), defaults to 6 (old behavior) when omitted
+- [~] `lib/media/ass.ts` (new) — generates a styled `.ass` file: one Dialogue event per word (not ASS `\k` karaoke tags — those persist the "already sung" color rather than isolating just the active word), each spanning that word's real timing, full cue text shown with only the active word wrapped in the highlight color
+- [~] `lib/media/ffmpeg.ts: burnAssSubtitles()` — burns the `.ass` onto the video via ffmpeg's `subtitles` filter + `fontsdir`. **Unverified**: needs ffmpeg-static's build to include libass support — not confirmed working on Vercel yet, first real test will tell us
+- [~] `app/api/tools/editor/run/route.ts` — `runPunchySubtitle()` now takes style options and returns a video (burn-in) or plain-text SRT result depending on `burn_in`
+- [~] `components/editor-client.tsx` — Style panel (shown for PUNCHY_SRT): burn-in toggle, words-per-line slider, font select (Kanit only for now), size slider, live font preview swatch (loads Kanit from Google Fonts CDN client-side, cosmetic only), text/highlight color swatches + custom picker, info badges for the two rules that are already always-on (continuous coverage, correct Thai spacing) rather than fake toggles
+- [ ] **Blocking**: `assets/fonts/` needs the actual `Kanit-Regular.ttf` + `Kanit-Bold.ttf` files added manually (Claude's sandbox had no shell access to download binaries this session) — see `assets/fonts/README.md` for the exact steps. Burn-in will fail without these.
+- [ ] `next.config.mjs` — ships `assets/fonts/**` with the `/api/tools/editor/run` function (done, no action needed)
+- [ ] Add font files, commit + push, test burn-in with a real Thai video end-to-end (this is the first real test of the ffmpeg `subtitles`/libass path)
+
 ## Phase 5 — QA / Deploy
 - [ ] Security: server-side keys only, RLS review, signed/private storage, Drive URL validation, filename sanitization, file size limits, timeouts, AI rate limits
 - [ ] Hide/archive any leftover V1-only routes instead of deleting (non-destructive)
