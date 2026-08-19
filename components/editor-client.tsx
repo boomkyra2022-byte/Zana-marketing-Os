@@ -118,6 +118,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
   const [progressStatus, setProgressStatus] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [result, setResult] = useState<{ kind: 'VIDEO' | 'SRT'; signed_url?: string; srt_text?: string } | null>(null);
+  const [videoDownloadState, setVideoDownloadState] = useState<'idle' | 'preparing' | 'error'>('idle');
 
   const selected = OPERATIONS.find((o) => o.value === operation)!;
 
@@ -265,6 +266,48 @@ export default function EditorClient({ products, recentJobs }: Props) {
     URL.revokeObjectURL(url);
   }
 
+  // Plain `<a href={remoteUrl} download>` only works reliably on desktop —
+  // mobile browsers (iOS Safari, Chrome on Android) silently ignore the
+  // `download` attribute on cross-origin URLs (our Supabase Storage signed
+  // URL is a different origin from the app) and just open/play the video
+  // inline instead, with no obvious "save" action. Fix: fetch the file into
+  // memory ourselves and either (a) hand it to the native Share sheet via
+  // the Web Share API — the real "Save Video" UX on mobile — or (b) fall
+  // back to a same-origin blob: URL download, which mobile browsers DO
+  // honor (same trick already used in downloadSrt() above).
+  async function saveVideoToDevice() {
+    if (!result?.signed_url) return;
+    setVideoDownloadState('preparing');
+    try {
+      const res = await fetch(result.signed_url);
+      if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
+      const blob = await res.blob();
+      const ext = result.signed_url.split('?')[0].split('.').pop() || 'mp4';
+      const filename = `zana-edit-${Date.now()}.${ext}`;
+      const file = new File([blob], filename, { type: blob.type || 'video/mp4' });
+
+      if (typeof navigator !== 'undefined' && navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      setVideoDownloadState('idle');
+    } catch (err) {
+      // Web Share API throws AbortError when the user just cancels the
+      // native share sheet — that's not a real error, don't show one.
+      if (err instanceof Error && err.name === 'AbortError') {
+        setVideoDownloadState('idle');
+        return;
+      }
+      setVideoDownloadState('error');
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="card p-6 space-y-4">
@@ -284,7 +327,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
 
         <div>
           <label className="field-label">Source Video *</label>
-          <div className="flex gap-2 mb-2">
+          <div className="flex gap-2 mb-2 flex-wrap">
             <button
               type="button"
               className={sourceMode === 'link' ? 'btn-primary' : 'btn-secondary'}
@@ -327,7 +370,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="field-label">สินค้า (ไม่บังคับ)</label>
             <select value={productId} onChange={(e) => setProductId(e.target.value)}>
@@ -402,7 +445,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
                   ))}
                 </select>
               </div>
-              <div className="col-span-2 text-xs text-gray-500 bg-surface rounded-lg p-3">
+              <div className="sm:col-span-2 text-xs text-gray-500 bg-surface rounded-lg p-3">
                 ⚠ วิธีนี้คือ <strong>เบลอ/ลบล้างพื้นที่มุมนั้นออก</strong> ไม่ใช่ AI สร้างภาพใต้ลายน้ำขึ้นใหม่แบบ Tamsub — เหมาะกับลายน้ำแบบโลโก้เล็กมุมนิ่งๆ
                 (เช่น Veo/Gemini) บนพื้นหลังไม่ซับซ้อน ถ้าตำแหน่งลายน้ำทับเนื้อหาสำคัญ ผลลัพธ์อาจดูเบลอในจุดนั้นชัดเจน
               </div>
@@ -439,7 +482,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
 
             {burnIn && (
               <>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="field-label">ฟอนต์</label>
                     <select value={fontName} onChange={(e) => setFontName(e.target.value)}>
@@ -472,7 +515,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="field-label">สีตัวอักษร</label>
                     <div className="flex gap-1.5 flex-wrap items-center">
@@ -538,15 +581,21 @@ export default function EditorClient({ products, recentJobs }: Props) {
         <div className="card p-6 space-y-3">
           <h3 className="font-semibold">ผลลัพธ์</h3>
           <video src={result.signed_url} controls className="w-full max-w-md rounded-lg" />
-          <div className="flex gap-3">
-            <a href={result.signed_url} download className="btn-secondary">
-              ดาวน์โหลดวิดีโอ
+          <div className="flex gap-3 flex-wrap">
+            <button className="btn-secondary" disabled={videoDownloadState === 'preparing'} onClick={saveVideoToDevice}>
+              {videoDownloadState === 'preparing' ? 'กำลังเตรียมไฟล์...' : 'บันทึกวิดีโอลงเครื่อง'}
+            </button>
+            <a href={result.signed_url} target="_blank" rel="noreferrer" className="btn-secondary">
+              เปิดในแท็บใหม่
             </a>
             <button className="btn-primary" onClick={useResultAsNextSource}>
               ใช้ผลลัพธ์นี้เป็น Source ต่อ →
             </button>
           </div>
-          <p className="text-xs text-gray-500">ลิงก์ดาวน์โหลดนี้หมดอายุใน 24 ชั่วโมง — ดูประวัติงานด้านล่างเพื่อขอลิงก์ใหม่ภายหลัง</p>
+          {videoDownloadState === 'error' && (
+            <p className="text-xs text-red-600">บันทึกไฟล์ไม่สำเร็จ ลองใหม่อีกครั้ง หรือกด "เปิดในแท็บใหม่" แล้วกดค้าง (long-press) ที่วิดีโอเพื่อบันทึกแทน</p>
+          )}
+          <p className="text-xs text-gray-500">ลิงก์ดาวน์โหลดนี้หมดอายุใน 24 ชั่วโมง — ดูประวัติงานด้านล่างเพื่อขอลิงก์ใหม่ภายหลัง — บนมือถือ ปุ่ม "บันทึกวิดีโอลงเครื่อง" จะเปิดหน้าต่างแชร์ของเครื่องให้เลือก "บันทึกวิดีโอ" ได้โดยตรง</p>
         </div>
       )}
 
@@ -565,21 +614,23 @@ export default function EditorClient({ products, recentJobs }: Props) {
         {recentJobs.length === 0 ? (
           <p className="text-gray-500 text-sm">ยังไม่มีประวัติ</p>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-surface text-left text-gray-500">
-              <tr>
-                <th className="px-2 py-2">การทำงาน</th>
-                <th className="px-2 py-2">สถานะ</th>
-                <th className="px-2 py-2">เวลา</th>
-                <th className="px-2 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {recentJobs.map((j) => (
-                <RecentJobRow key={j.id} job={j} />
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+            <table className="w-full text-sm min-w-[480px]">
+              <thead className="bg-surface text-left text-gray-500">
+                <tr>
+                  <th className="px-2 py-2">การทำงาน</th>
+                  <th className="px-2 py-2">สถานะ</th>
+                  <th className="px-2 py-2">เวลา</th>
+                  <th className="px-2 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {recentJobs.map((j) => (
+                  <RecentJobRow key={j.id} job={j} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
