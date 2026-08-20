@@ -292,7 +292,12 @@ export default function EditorClient({ products, recentJobs }: Props) {
         body: JSON.stringify({
           source_url: sourceUrl,
           product_id: productId || null,
-          max_words_per_cue: maxWordsPerCue
+          max_words_per_cue: maxWordsPerCue,
+          // "อัปโหลดไฟล์จากเครื่อง" mode: sourceUrl is already a directly-
+          // playable Supabase signed URL — tell the server to skip
+          // re-uploading it a second time (saves storage + upload time,
+          // and avoids hitting a Storage size-limit error for no benefit).
+          source_already_playable: sourceMode === 'upload'
         })
       });
       const json = await res.json();
@@ -300,7 +305,10 @@ export default function EditorClient({ products, recentJobs }: Props) {
 
       setLiveCues(json.cues);
       setLiveAudioUrl(json.audio_url);
-      setLiveVideoUrl(json.video_url);
+      // json.video_url is null when the server skipped re-upload (upload
+      // mode) — fall back to the original sourceUrl, which is already
+      // directly playable in that case.
+      setLiveVideoUrl(json.video_url || sourceUrl);
       setLiveMetadata({ width: json.metadata.width, height: json.metadata.height, durationSec: json.metadata.duration_sec });
       setTranscribeState('idle');
     } catch (err: any) {

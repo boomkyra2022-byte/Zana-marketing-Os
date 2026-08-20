@@ -31,7 +31,15 @@ export const maxDuration = 180;
 const requestSchema = z.object({
   source_url: z.string().min(1),
   product_id: z.string().uuid().nullable().optional(),
-  max_words_per_cue: z.number().int().min(2).max(10).optional()
+  max_words_per_cue: z.number().int().min(2).max(10).optional(),
+  // "อัปโหลดไฟล์จากเครื่อง" mode: `source_url` is already a signed URL to
+  // our own Storage (source-uploads bucket), already directly playable by
+  // a <video> tag — re-uploading it a second time to edited-clips would be
+  // pure waste (double the storage, double the upload time, and doubles
+  // the chance of hitting a Storage size-limit error on large files for no
+  // benefit). Only "วางลิงก์" mode (which may be an unplayable Drive share
+  // page URL) actually needs the re-upload-for-preview trick.
+  source_already_playable: z.boolean().optional()
 });
 
 const punchyCuesSchema = z.object({
@@ -152,14 +160,18 @@ export async function POST(request: Request) {
     // (server already has them in memory from downloadSourceVideo, before
     // this route's `finally` cleans up the temp file) fixes every source
     // type the same way.
-    const videoBuffer = fs.readFileSync(sourcePath);
-    const { signedUrl: videoUrl } = await uploadEditedClip(videoBuffer, `transcribe_${runId}_preview.mp4`, 'video/mp4');
+    let videoUrl: string | null = null;
+    if (!input.source_already_playable) {
+      const videoBuffer = fs.readFileSync(sourcePath);
+      const uploaded = await uploadEditedClip(videoBuffer, `transcribe_${runId}_preview.mp4`, 'video/mp4');
+      videoUrl = uploaded.signedUrl;
+    }
 
     return new Response(
       JSON.stringify({
         cues,
         audio_url: audioUrl,
-        video_url: videoUrl,
+        video_url: videoUrl, // null when source_already_playable — client falls back to its own source_url
         metadata: { width: metadata.width, height: metadata.height, duration_sec: metadata.durationSec },
         prompt_version: PROMPT_VERSION_PUNCHY_SUBTITLE
       }),
