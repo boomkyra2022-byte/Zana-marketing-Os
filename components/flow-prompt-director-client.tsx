@@ -318,7 +318,7 @@ export default function FlowPromptDirectorClient({ products, personas, ideas, sc
   async function loadHistoryProject(id: string) {
     setError('');
     try {
-      const res = await fetch(`/api/tools/flow-prompt/${id}`);
+      const res = await fetch(`/api/tools/flow-prompt/generate?id=${id}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'โหลดโปรเจกต์ไม่สำเร็จ');
       const fp = json.flow_prompt;

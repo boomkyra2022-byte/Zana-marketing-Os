@@ -462,6 +462,30 @@ async function handleSave(supabase: SupabaseClient, userId: string, input: z.inf
   return NextResponse.json({ flow_prompt: saved });
 }
 
+// Folded in from the old `/api/tools/flow-prompt/[id]/route.ts` (single-
+// purpose GET-by-id lookup) to save a Serverless Function slot — this
+// project's deployment sits right at Vercel Hobby's 12-function cap (see the
+// "Fix Vercel Hobby plan function-count overflow" postmortem in TODO.md), so
+// every new route added from here on must either fold into an existing file
+// or free up a slot elsewhere first. Client call-sites now call
+// `GET /api/tools/flow-prompt/generate?id=...` instead of the old
+// `/api/tools/flow-prompt/:id` path. Same lookup, same response shape.
+export async function GET(request: Request) {
+  const supabase = createClient();
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const id = new URL(request.url).searchParams.get('id');
+  if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+
+  const { data, error } = await supabase.from('flow_prompts').select('*').eq('id', id).single();
+  if (error || !data) return NextResponse.json({ error: 'ไม่พบชุด prompt นี้' }, { status: 404 });
+
+  return NextResponse.json({ flow_prompt: data });
+}
+
 export async function POST(request: Request) {
   const supabase = createClient();
   const {

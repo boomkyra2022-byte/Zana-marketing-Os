@@ -170,6 +170,76 @@ export async function transcribeAudio(opts: { fileBuffer: Buffer; filename: stri
   return { text, model };
 }
 
+// Text-to-speech via /v1/audio/speech — added for the standalone Voiceover
+// tool, explicit user request ("พากย์เสียงอัตโนมัติ ... เลือกเสียงได้
+// ผู้ชาย ผู้หญิง กำหนดโทนเสียงได้"). Uses gpt-4o-mini-tts, OpenAI's newest
+// TTS model — the only one that honors the `instructions` field for
+// natural-language tone/style/accent/speed steering (tts-1/tts-1-hd ignore
+// it entirely), which is what gives us "กำหนดโทนเสียงได้" without needing a
+// second provider. Reuses the same OPENAI_API_KEY already configured for
+// every other AI call in this app — zero new setup.
+export const TTS_VOICES = [
+  'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
+  'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'
+] as const;
+export type TtsVoice = (typeof TTS_VOICES)[number];
+
+export async function generateSpeech(opts: {
+  text: string;
+  voice: TtsVoice;
+  instructions?: string;
+  model?: string;
+  format?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav';
+  timeoutMs?: number;
+}): Promise<{ buffer: Buffer; contentType: string }> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new AIProviderError('OPENAI_API_KEY is not configured in .env.local', 500);
+  }
+  const model = opts.model || 'gpt-4o-mini-tts';
+  const format = opts.format || 'mp3';
+
+  let res: Response;
+  try {
+    res = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        voice: opts.voice,
+        input: opts.text,
+        instructions: opts.instructions || undefined,
+        response_format: format
+      }),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 60000)
+    });
+  } catch (err: any) {
+    if (err?.name === 'TimeoutError') {
+      throw new AIProviderError(`สร้างเสียงพากย์ใช้เวลานานเกินไป (timeout)`, 504);
+    }
+    throw new AIProviderError(err?.message || 'เชื่อมต่อ OpenAI TTS ไม่สำเร็จ', 502);
+  }
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new AIProviderError(`สร้างเสียงพากย์ไม่สำเร็จ (${res.status}): ${errText.slice(0, 400)}`, 502);
+  }
+
+  const contentTypeMap: Record<string, string> = {
+    mp3: 'audio/mpeg',
+    opus: 'audio/opus',
+    aac: 'audio/aac',
+    flac: 'audio/flac',
+    wav: 'audio/wav'
+  };
+
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return { buffer, contentType: contentTypeMap[format] };
+}
+
 export interface TranscribedWord {
   word: string;
   start: number;

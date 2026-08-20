@@ -92,7 +92,7 @@ export default function FlowPromptClient({ products, recentSets }: Props) {
     setHistoryLoading(id);
     setError('');
     try {
-      const res = await fetch(`/api/tools/flow-prompt/${id}`);
+      const res = await fetch(`/api/tools/flow-prompt/generate?id=${id}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
       const fp = json.flow_prompt;
