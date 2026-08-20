@@ -29,6 +29,7 @@ import { transcribeAudioWithTimestamps, callOpenAIJSON, AIProviderError } from '
 import { buildPunchySubtitlePrompt, PROMPT_VERSION_PUNCHY_SUBTITLE } from '@/prompts/punchy-subtitle';
 import { repairCueCoverage, resolveCueTimestamps, resolveCueTimestampsWithWords, cuesToSrt, type RawCue, type TimedCueWithWords } from '@/lib/media/srt';
 import { buildKaraokeAss } from '@/lib/media/ass';
+import { regroupWhisperWordsThai } from '@/lib/media/word-segment';
 
 // Editor tool (silence-cut / subtitle burn-in / SRT export / dewatermark /
 // punchy-subtitle). Everything here runs on our own ffmpeg/Whisper/GPT
@@ -166,7 +167,9 @@ async function runPunchySubtitle(
       await extractAudio(sourcePath, audioPath);
       const audioBuffer = fs.readFileSync(audioPath);
 
-      const { words } = await transcribeAudioWithTimestamps({ fileBuffer: audioBuffer, filename: 'audio.mp3' });
+      const { words: rawWords } = await transcribeAudioWithTimestamps({ fileBuffer: audioBuffer, filename: 'audio.mp3' });
+      // Same Thai sub-word-fragment fix as the Live Editor's transcribe route.
+      const words = await regroupWhisperWordsThai(rawWords);
 
       let productName: string | null = null;
       let brand: string | null = null;

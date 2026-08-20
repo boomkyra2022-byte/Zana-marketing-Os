@@ -11,6 +11,7 @@ import { uploadEditedClip } from '@/lib/supabase/storage';
 import { transcribeAudioWithTimestamps, callOpenAIJSON, AIProviderError } from '@/lib/ai/openai';
 import { buildPunchySubtitlePrompt, PROMPT_VERSION_PUNCHY_SUBTITLE } from '@/prompts/punchy-subtitle';
 import { repairCueCoverage, resolveCueTimestampsWithWords, type RawCue } from '@/lib/media/srt';
+import { regroupWhisperWordsThai } from '@/lib/media/word-segment';
 
 // Transcribe-only step for the Live Editor (Tamsub-style timeline + live
 // caption preview) — added per explicit user request: "ปรับให้หน้าตาเป็นแบบ
@@ -86,10 +87,14 @@ export async function POST(request: Request) {
     await extractAudio(sourcePath, audioPath);
     const audioBuffer = fs.readFileSync(audioPath);
 
-    const { words } = await transcribeAudioWithTimestamps({ fileBuffer: audioBuffer, filename: 'audio.mp3' });
-    if (words.length === 0) {
+    const { words: rawWords } = await transcribeAudioWithTimestamps({ fileBuffer: audioBuffer, filename: 'audio.mp3' });
+    if (rawWords.length === 0) {
       throw new AIProviderError('ถอดเสียงไม่สำเร็จ — ไม่พบคำพูดในคลิปนี้ (อาจเป็นคลิปเงียบหรือมีแต่เสียงเพลง)', 502);
     }
+    // Whisper's raw word-level tokens for Thai are frequently sub-word
+    // fragments (no spaces in Thai script) — regroup into real words before
+    // anything downstream (cue grouping, the Live Editor timeline) sees them.
+    const words = await regroupWhisperWordsThai(rawWords);
 
     let productName: string | null = null;
     let brand: string | null = null;
