@@ -137,10 +137,29 @@ export async function POST(request: Request) {
 
     const { signedUrl: audioUrl } = await uploadEditedClip(audioBuffer, `transcribe_${runId}_audio.mp3`, 'audio/mpeg');
 
+    // Also re-upload the source video itself so the Live Editor's <video>
+    // preview always has a directly-streamable, same-CDN URL to point at —
+    // real bug found in testing: when `source_url` is the user's original
+    // pasted Google Drive link, a plain <video src> can only play it when
+    // Drive happens to serve raw bytes directly (small files); once a file
+    // is large enough to trigger Drive's "can't scan for viruses"
+    // interstitial, Drive serves an HTML warning page instead of video
+    // bytes and the preview player breaks — worked in earlier (smaller)
+    // test clips purely by coincidence, not because it was actually
+    // reliable. Uploaded-from-device sources didn't have this problem
+    // (Supabase Storage always serves real bytes), but Drive/any other
+    // remote URL did. Re-uploading the already-downloaded video bytes here
+    // (server already has them in memory from downloadSourceVideo, before
+    // this route's `finally` cleans up the temp file) fixes every source
+    // type the same way.
+    const videoBuffer = fs.readFileSync(sourcePath);
+    const { signedUrl: videoUrl } = await uploadEditedClip(videoBuffer, `transcribe_${runId}_preview.mp4`, 'video/mp4');
+
     return new Response(
       JSON.stringify({
         cues,
         audio_url: audioUrl,
+        video_url: videoUrl,
         metadata: { width: metadata.width, height: metadata.height, duration_sec: metadata.durationSec },
         prompt_version: PROMPT_VERSION_PUNCHY_SUBTITLE
       }),

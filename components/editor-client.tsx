@@ -72,7 +72,49 @@ const WATERMARK_SIZES: { value: string; label: string }[] = [
 // listed for now because it's the only font file actually bundled in the
 // repo (assets/fonts/ — see README there); more can be added the same way
 // later without any code changes here beyond adding an entry to this list.
-const FONT_OPTIONS: { value: string; label: string }[] = [{ value: 'Kanit', label: 'Kanit' }];
+// Expanded from Kanit-only per explicit user request ("เพิ่มฟอนต์อื่นๆเข้าไปด้วย
+// ให้เหมือนกับระบบ Capcut เลย"). Honest framing (told to the user directly, not
+// just in code comments): CapCut's actual font library is proprietary/licensed
+// to them, so we can't literally reuse their exact font files — this is a
+// curated set of quality Google Fonts instead, chosen to cover a similar
+// *range* of caption styles (bold modern, rounded/friendly, display/vintage,
+// playful script, handwriting, elegant serif) while guaranteeing full Thai
+// glyph coverage (critical — a Latin-only font would render Thai captions as
+// tofu boxes, defeating the point). See assets/fonts/README.md — burn-in for
+// any of these needs its .ttf file added there first (browser live-preview
+// below works immediately via Google Fonts CDN regardless, only the actual
+// exported/burned video needs the local file).
+const FONT_OPTIONS: { value: string; label: string }[] = [
+  { value: 'Kanit', label: 'Kanit — โมเดิร์น หนาเข้ม (ค่าเริ่มต้น)' },
+  { value: 'Prompt', label: 'Prompt — เรียบง่าย สะอาดตา' },
+  { value: 'Mitr', label: 'Mitr — มนกลม น่ารัก' },
+  { value: 'Bai Jamjuree', label: 'Bai Jamjuree — ทันสมัย ดูเท่' },
+  { value: 'Chonburi', label: 'Chonburi — ตัวหนาเข้ม สไตล์วินเทจ' },
+  { value: 'Pattaya', label: 'Pattaya — เพรียวบาง สนุกสนาน' },
+  { value: 'Charmonman', label: 'Charmonman — ลายมือ หวาน' },
+  { value: 'Taviraj', label: 'Taviraj — เซอริฟคลาสสิก' },
+  // Extra 11 — user downloaded these Thai Google Fonts too (beyond the
+  // original 8 requested), so they're wired in rather than left unused.
+  { value: 'Anuphan', label: 'Anuphan — เรียบหรู อ่านง่าย' },
+  { value: 'Athiti', label: 'Athiti — บาง เรียบ' },
+  { value: 'IBM Plex Sans Thai', label: 'IBM Plex Sans Thai — มืออาชีพ ธุรกิจ' },
+  { value: 'IBM Plex Sans Thai Looped', label: 'IBM Plex Sans Thai Looped — มืออาชีพ ปลายมน' },
+  { value: 'Itim', label: 'Itim — กลม น่ารัก การ์ตูน' },
+  { value: 'K2D', label: 'K2D — เท่ เหลี่ยม' },
+  { value: 'Mali', label: 'Mali — ลายมือ กลมมน' },
+  { value: 'Noto Sans Thai', label: 'Noto Sans Thai — เป็นกลาง อ่านชัด' },
+  { value: 'Noto Sans Thai Looped', label: 'Noto Sans Thai Looped — เป็นกลาง ปลายมน' },
+  { value: 'Playpen Sans Thai', label: 'Playpen Sans Thai — ลายมือเด็ก สนุก' },
+  { value: 'Sriracha', label: 'Sriracha — ลายมือ ลำลอง' }
+];
+
+// Google Fonts CSS2 API accepts multiple `family=` params in one request —
+// used only for the browser-side live preview swatch below (cosmetic), not
+// related to the server-side burn-in font files.
+const GOOGLE_FONTS_HREF =
+  'https://fonts.googleapis.com/css2?' +
+  FONT_OPTIONS.map((f) => `family=${encodeURIComponent(f.value)}:wght@400;700`).join('&') +
+  '&display=swap';
 
 const TEXT_COLOR_SWATCHES = ['#FFFFFF', '#000000', '#FACC15', '#F97316', '#22C55E', '#38BDF8', '#EC4899'];
 const HIGHLIGHT_COLOR_SWATCHES = ['#FACC15', '#F97316', '#22C55E', '#38BDF8', '#EC4899', '#FFFFFF', '#000000'];
@@ -129,6 +171,12 @@ export default function EditorClient({ products, recentJobs }: Props) {
   // never silently discarded and re-transcribed away.
   const [liveCues, setLiveCues] = useState<LivePreviewCue[] | null>(null);
   const [liveAudioUrl, setLiveAudioUrl] = useState('');
+  // Re-uploaded copy of the source video, always a same-CDN directly-
+  // streamable URL — NOT the same as `sourceUrl`, which for "วางลิงก์" mode
+  // is the user's original pasted link (e.g. a Google Drive share page)
+  // that a plain <video> tag often can't play at all. See the comment in
+  // app/api/tools/editor/transcribe/route.ts for the real bug this fixes.
+  const [liveVideoUrl, setLiveVideoUrl] = useState('');
   const [liveMetadata, setLiveMetadata] = useState<{ width: number; height: number; durationSec: number } | null>(null);
   const [transcribeState, setTranscribeState] = useState<'idle' | 'transcribing' | 'error'>('idle');
   const [transcribeError, setTranscribeError] = useState('');
@@ -218,6 +266,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
   function resetLiveEditor() {
     setLiveCues(null);
     setLiveAudioUrl('');
+    setLiveVideoUrl('');
     setLiveMetadata(null);
     setTranscribeState('idle');
     setTranscribeError('');
@@ -251,6 +300,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
 
       setLiveCues(json.cues);
       setLiveAudioUrl(json.audio_url);
+      setLiveVideoUrl(json.video_url);
       setLiveMetadata({ width: json.metadata.width, height: json.metadata.height, durationSec: json.metadata.duration_sec });
       setTranscribeState('idle');
     } catch (err: any) {
@@ -590,10 +640,10 @@ export default function EditorClient({ products, recentJobs }: Props) {
                   </div>
                 </div>
 
-                {/* Cosmetic only — loads the real Kanit webfont so the preview below matches
-                    what gets burned into the video. Doesn't affect the server-side render,
-                    which uses the .ttf file in assets/fonts/. */}
-                <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;700&display=swap" />
+                {/* Cosmetic only — loads all 8 candidate webfonts so the preview below
+                    matches whichever one is selected. Doesn't affect the server-side
+                    render, which uses the .ttf file in assets/fonts/ for burn-in. */}
+                <link rel="stylesheet" href={GOOGLE_FONTS_HREF} />
                 <div
                   className="rounded-lg p-4 flex items-center justify-center bg-navy"
                   style={{ minHeight: 80 }}
@@ -672,7 +722,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
 
                   {liveCues && liveMetadata && (
                     <EditorLivePreview
-                      sourceUrl={sourceUrl}
+                      sourceUrl={liveVideoUrl}
                       audioUrl={liveAudioUrl}
                       durationSec={liveMetadata.durationSec}
                       videoWidthPx={liveMetadata.width}
@@ -688,8 +738,9 @@ export default function EditorClient({ products, recentJobs }: Props) {
                 </div>
 
                 <p className="text-xs text-gray-500 bg-white rounded-lg p-3 border border-border">
-                  ⚠ ฟีเจอร์นี้เผาซับลงวิดีโอจริงด้วย ffmpeg — ต้องมีไฟล์ฟอนต์ Kanit วางไว้ในเซิร์ฟเวอร์ก่อน (ดู <code>assets/fonts/README.md</code>)
-                  ทั้งการเผาซับ (libass) และ Live Editor timeline นี้ยังไม่เคยทดสอบจริงบน production มาก่อน — ถ้าล้มเหลวให้ลองปิด Burn-in แล้วใช้ไฟล์ .srt ธรรมดาไปก่อน
+                  ⚠ ฟีเจอร์นี้เผาซับลงวิดีโอจริงด้วย ffmpeg — ฟอนต์ที่เลือกไว้ต้องมีไฟล์ .ttf วางไว้ในเซิร์ฟเวอร์ก่อนถึงจะเผาได้จริง (ดู{' '}
+                  <code>assets/fonts/README.md</code>) ตอนนี้มีให้เลือก 8 แบบในเมนู แต่ถ้ายังไม่ได้เพิ่มไฟล์ของฟอนต์ไหน การเผาด้วยฟอนต์นั้นจะล้มเหลว — Live Editor
+                  จะแสดงตัวอย่างในเบราว์เซอร์ได้ปกติเสมอ (โหลดจาก Google Fonts) ไม่ว่าจะมีไฟล์ในเซิร์ฟเวอร์หรือไม่
                 </p>
               </>
             )}
