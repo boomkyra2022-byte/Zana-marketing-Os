@@ -1,67 +1,73 @@
-// Orchestrates the Thai word-segmentation regroup (see
-// prompts/word-segment.ts for the why). Called once, right after
-// transcribeAudioWithTimestamps(), before any cue-grouping or rendering
-// code sees the "words" array — every downstream consumer (punchy-subtitle
-// cue grouping, the Live Editor timeline, the ASS karaoke burn-in) then
-// naturally gets real words for free, no changes needed on their end.
+// Fixes Thai word/syllable fragmentation from Whisper's word-level
+// timestamps. See prompts/word-segment.ts (kept for reference/possible
+// future use) for the *first* attempt at this — using GPT to regroup
+// fragments by choosing index ranges. That approach is NOT used anymore:
+// a real user screenshot after deploying it showed garbled results
+// (fragments merged in the wrong order/combination, in some spots worse
+// than the original un-regrouped tokens) — GPT-4o-mini's own merge
+// decisions weren't reliable enough for this, and its coverage-repair
+// fallback (for any indices it left ungrouped) dumped raw leftover tokens
+// verbatim with zero orthographic awareness, which is exactly the kind of
+// invalid-looking chunk seen in that screenshot.
+//
+// Replaced with a purely rule-based, deterministic repair instead. This is
+// slower to reach full "one block per real word" (Whisper's native token
+// granularity for Thai is often at the syllable level, so blocks may still
+// be per-syllable rather than per-word after this — a real limitation,
+// not hidden), but it can never produce an orthographically-invalid
+// result, unlike the AI approach. Two rules, both unconditionally true in
+// Thai script (not guesses):
+//   1. A token that is NOTHING BUT a leading vowel (เ แ โ ใ ไ) is always a
+//      fragment — Thai leading vowels are written before the consonant
+//      they're pronounced after, so it always belongs to the following
+//      token. Merge forward.
+//   2. A token that STARTS with a non-spacing combining mark (tone marks,
+//      above/below vowels) or one of the two spacing marks that always
+//      attach to the preceding consonant (ะ, ำ) can never legitimately
+//      start a token/word. Merge backward into the previous token.
 
-import { callOpenAIJSON, AIProviderError } from '@/lib/ai/openai';
-import { buildWordSegmentPrompt } from '@/prompts/word-segment';
-import { repairCueCoverage, type RawCue, type TimedWord } from './srt';
+import type { TimedWord } from './srt';
 
-const THAI_CHAR_RE = /[฀-๿]/;
+const THAI_LEADING_VOWEL_RE = /^[เแโใไ]$/; // เ แ โ ใ ไ, alone
+const THAI_BACKWARD_ATTACH_RE = /^[ะัำ-ฺ็-๎]/; // ะ ั ำ ิ ี ึ ื ุ ู ฺ ์ ็ ่ ้ ๊ ๋ ํ ๎ as the first char
 
-export async function regroupWhisperWordsThai(words: TimedWord[]): Promise<TimedWord[]> {
+export function repairThaiTokenFragments(words: TimedWord[]): TimedWord[] {
   if (words.length === 0) return words;
 
-  // Skip the extra AI round-trip when there's no Thai in the transcript at
-  // all — Whisper's tokens for space-delimited languages (English, etc.)
-  // are already real words, so regrouping would be pure cost with no benefit.
-  const hasThaiChar = words.some((w) => THAI_CHAR_RE.test(w.word));
-  if (!hasThaiChar) return words;
-
-  const { system, user } = buildWordSegmentPrompt({
-    tokens: words.map((w) => ({ token: w.word, start: w.start, end: w.end }))
-  });
-
-  let aiText: string;
-  try {
-    const res = await callOpenAIJSON({ system, user, temperature: 0, timeoutMs: 60000 });
-    aiText = res.text;
-  } catch {
-    // Word-segmentation is a quality improvement, not a hard requirement —
-    // if the AI call itself fails (timeout, provider error), fall back to
-    // the raw Whisper tokens rather than failing the whole transcribe/run.
-    return words;
+  // Pass 1: a bare leading-vowel token always merges forward into the next token.
+  const step1: TimedWord[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    const trimmed = w.word.trim();
+    if (THAI_LEADING_VOWEL_RE.test(trimmed) && i + 1 < words.length) {
+      const next = words[i + 1];
+      step1.push({ word: trimmed + next.word.trim(), start: w.start, end: next.end });
+      i++; // the next token was consumed into this merge
+    } else {
+      step1.push({ word: trimmed, start: w.start, end: w.end });
+    }
   }
 
-  let rawGroups: RawCue[];
-  try {
-    const parsed = JSON.parse(aiText);
-    rawGroups = Array.isArray(parsed?.groups) ? parsed.groups : [];
-  } catch {
-    return words; // same fallback reasoning as above
+  // Pass 2: a token starting with a backward-attaching mark always merges
+  // into the previous token.
+  const step2: TimedWord[] = [];
+  for (const w of step1) {
+    if (step2.length > 0 && w.word.length > 0 && THAI_BACKWARD_ATTACH_RE.test(w.word)) {
+      const prev = step2[step2.length - 1];
+      prev.word = prev.word + w.word;
+      prev.end = w.end;
+    } else {
+      step2.push({ ...w });
+    }
   }
 
-  const repaired = repairCueCoverage(words, rawGroups);
-
-  const merged = repaired
-    .map((g): TimedWord | null => {
-      const slice = words.slice(g.start_word_index, g.end_word_index + 1);
-      if (slice.length === 0) return null;
-      return {
-        word: slice.map((w) => w.word.trim()).join(''),
-        start: slice[0].start,
-        end: slice[slice.length - 1].end
-      };
-    })
-    .filter((w): w is TimedWord => !!w && w.word.length > 0 && w.end > w.start);
-
-  // Sanity check: if the regroup somehow produced nothing usable, fall back
-  // rather than breaking the pipeline over a quality-only feature.
-  return merged.length > 0 ? merged : words;
+  return step2.filter((w) => w.word.length > 0 && w.end >= w.start);
 }
 
-// Re-exported for callers that want to surface AI errors distinctly if they
-// choose not to use the built-in fallback-on-failure behavior above.
-export { AIProviderError };
+// Kept as the exported name every call site already uses
+// (app/api/tools/editor/transcribe/route.ts, app/api/tools/editor/run/route.ts)
+// so no changes were needed there when this was rewritten from the AI
+// approach to the deterministic one above.
+export async function regroupWhisperWordsThai(words: TimedWord[]): Promise<TimedWord[]> {
+  return repairThaiTokenFragments(words);
+}

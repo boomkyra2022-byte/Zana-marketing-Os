@@ -211,6 +211,14 @@ export default function EditorLivePreview({
       });
       return { ...c, words };
     });
+    // Update the ref synchronously, not just via the `cues` prop -> effect
+    // round trip below — pointermove can fire multiple times before React
+    // has committed the previous update and re-run that effect, which
+    // would make the next drag step compute `next` from a stale base and
+    // silently drop part of the drag. This was a real latent bug (found
+    // during a user report that edits weren't reliably showing up),
+    // independent of whether it was the actual cause in this case.
+    cuesRef.current = next;
     onCuesChange(next);
   }
 
@@ -236,6 +244,7 @@ export default function EditorLivePreview({
       });
       return { ...c, text: words.map((w) => w.text).join(''), words };
     });
+    cuesRef.current = next; // same synchronous-ref reasoning as the drag handler above
     onCuesChange(next);
     setEditingWord(null);
   }
