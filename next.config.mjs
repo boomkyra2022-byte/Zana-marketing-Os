@@ -34,16 +34,23 @@ const nextConfig = {
       // lib/media/ffmpeg.ts: burnAssSubtitles) for the styled-caption
       // burn-in feature. Without these, libass has no Thai-capable font to
       // render with and text comes out as tofu/boxes.
-      '/api/tools/editor/run': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './assets/fonts/**'],
-      '/api/tools/editor/run/route': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './assets/fonts/**'],
-      '/api/tools/editor/run/**/*': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './assets/fonts/**'],
+      '/api/tools/editor/run': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './assets/fonts/**', './node_modules/wordcut/**'],
+      '/api/tools/editor/run/route': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './assets/fonts/**', './node_modules/wordcut/**'],
+      '/api/tools/editor/run/**/*': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './assets/fonts/**', './node_modules/wordcut/**'],
       // Live Editor transcribe-only step (added for the Tamsub-style
       // timeline + live preview) — calls probeMetadata/extractAudio too, so
       // needs the same ffmpeg/ffprobe binaries. No font file needed here
       // (it never burns anything onto the video, just extracts audio).
-      '/api/tools/editor/transcribe': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**'],
-      '/api/tools/editor/transcribe/route': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**'],
-      '/api/tools/editor/transcribe/**/*': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**']
+      // `wordcut` (Thai word segmentation, see lib/media/word-segment.ts)
+      // loads its dictionary via fs.readFileSync + a glob() pattern
+      // (node_modules/wordcut/data/tdict-*.txt) — Next.js's file tracer
+      // cannot follow dynamic glob-resolved paths, so without this explicit
+      // include the dictionary silently gets left out of the deployed
+      // function and every call falls back to the (worse) Unicode-rule
+      // repair. Same class of bug as the ffmpeg-static binary above.
+      '/api/tools/editor/transcribe': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './node_modules/wordcut/**'],
+      '/api/tools/editor/transcribe/route': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './node_modules/wordcut/**'],
+      '/api/tools/editor/transcribe/**/*': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './node_modules/wordcut/**']
     }
   }
 };

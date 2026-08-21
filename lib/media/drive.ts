@@ -26,7 +26,11 @@ export function extractDriveFileId(url: string): string {
 }
 
 const ALLOWED_MIME_PREFIXES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'];
-const MAX_BYTES_DEFAULT = 300 * 1024 * 1024; // 300MB
+// 50MB — matches Supabase Free plan's hard Global Storage limit (see the
+// comment in components/editor-client.tsx: MAX_UPLOAD_BYTES for the full
+// reasoning). Downloads bigger than this would just fail later anyway when
+// the processed result tries to upload to Supabase Storage.
+const MAX_BYTES_DEFAULT = 50 * 1024 * 1024;
 
 // Google's virus-scan bypass flow behaves more reliably (fewer interstitial
 // loops) when the request looks like a real browser rather than a bare

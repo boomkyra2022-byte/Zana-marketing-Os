@@ -85,7 +85,11 @@ export async function POST(request: Request) {
   const audioPath = path.join(tmpDir, `transcribe_${runId}_audio.mp3`);
 
   try {
-    await downloadSourceVideo(input.source_url, sourcePath, { maxBytes: 300 * 1024 * 1024 });
+    // 50MB — matches Supabase Free plan's hard Global Storage limit (see
+    // components/editor-client.tsx: MAX_UPLOAD_BYTES for the full
+    // reasoning). This route re-uploads the video+audio to Supabase
+    // Storage below, so a bigger download here would just fail there.
+    await downloadSourceVideo(input.source_url, sourcePath, { maxBytes: 50 * 1024 * 1024 });
 
     const metadata = await probeMetadata(sourcePath);
     if (!metadata.width || !metadata.height) {

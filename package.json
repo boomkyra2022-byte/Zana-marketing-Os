@@ -19,7 +19,8 @@
     "clsx": "^2.1.1",
     "zod": "^3.23.8",
     "ffmpeg-static": "^5.2.0",
-    "ffprobe-static": "^3.1.0"
+    "ffprobe-static": "^3.1.0",
+    "wordcut": "^0.9.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

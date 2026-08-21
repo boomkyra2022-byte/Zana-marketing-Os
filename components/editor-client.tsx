@@ -4,7 +4,20 @@ import { useState, type ChangeEvent } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import EditorLivePreview, { type LivePreviewCue } from '@/components/editor-live-preview';
 
-const MAX_UPLOAD_BYTES = 300 * 1024 * 1024; // matches server-side MAX_BYTES_DEFAULT
+// 50MB, not 300MB — confirmed via the user's Supabase dashboard (org shows
+// "FREE" tier) that the project's Global Storage file size limit is
+// hard-capped at 50MB on Supabase's Free plan and literally cannot be
+// raised at all until the project upgrades to Pro. Advertising/accepting up
+// to 300MB when Storage would reject anything over 50MB regardless was a
+// real bug (user hit "The object exceeded the maximum allowed size"
+// repeatedly) — this app-side limit now matches infrastructure reality
+// instead of promising a capability the current plan can't deliver. If/when
+// the project upgrades to Pro, raise the Global limit in the Supabase
+// dashboard first, then bump this constant (and its counterparts in
+// lib/media/drive.ts, lib/media/source.ts, app/api/tools/editor/run/route.ts,
+// app/api/creative/videos/import/route.ts, app/api/tools/editor/transcribe/route.ts)
+// back up together.
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 const ALLOWED_UPLOAD_TYPES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'];
 const EXT_BY_TYPE: Record<string, string> = {
   'video/mp4': 'mp4',

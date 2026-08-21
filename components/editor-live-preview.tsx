@@ -353,7 +353,13 @@ export default function EditorLivePreview({
                             if (e.key === 'Escape') setEditingWord(null);
                           }}
                           onClick={(e) => e.stopPropagation()}
-                          className="!w-full !p-0 !text-[11px] !text-black !text-center"
+                          // Global input styling (app/globals.css) sets a white
+                          // background + border + padding on every plain
+                          // <input> — fine everywhere else, but it made this
+                          // one pop out as a jarring white box inside the dark
+                          // timeline chip. Override all of it, not just size,
+                          // so it actually blends into the chip while editing.
+                          className="!w-full !p-0 !m-0 !border-0 !rounded-none !bg-transparent !text-[11px] !text-white !text-center"
                         />
                       ) : (
                         word.text.trim()

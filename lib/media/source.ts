@@ -19,7 +19,9 @@ export class SourceImportError extends Error {
 }
 
 const ALLOWED_MIME_PREFIXES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska'];
-const MAX_BYTES_DEFAULT = 300 * 1024 * 1024; // 300MB
+// 50MB — matches Supabase Free plan's hard Global Storage limit (see
+// components/editor-client.tsx: MAX_UPLOAD_BYTES for the full reasoning).
+const MAX_BYTES_DEFAULT = 50 * 1024 * 1024;
 
 export type SourceKind = 'drive' | 'url';
 

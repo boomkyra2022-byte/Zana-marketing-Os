@@ -47,7 +47,9 @@ import { regroupWhisperWordsThai } from '@/lib/media/word-segment';
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
-const MAX_BYTES_DEFAULT = 300 * 1024 * 1024;
+// 50MB — matches Supabase Free plan's hard Global Storage limit (see
+// components/editor-client.tsx: MAX_UPLOAD_BYTES for the full reasoning).
+const MAX_BYTES_DEFAULT = 50 * 1024 * 1024;
 
 const requestSchema = z.object({
   operation: z.enum(['SILENCE_CUT', 'PUNCHY_SRT', 'DEWATERMARK_LOCAL']),
