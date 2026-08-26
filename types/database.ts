@@ -237,3 +237,86 @@ export interface Winner {
   created_by: string | null;
   created_at: string;
 }
+
+// ============================================================
+// Ads Automation Bot — Phase 1 (see supabase/migrations/0014_ads_automation_phase1.sql)
+// ============================================================
+
+export type AdAccountStatus = 'active' | 'paused' | 'disabled';
+
+export interface AdAccount {
+  id: string;
+  meta_account_id: string;
+  name: string;
+  currency: string | null;
+  timezone_name: string | null;
+  business_id: string | null;
+  status: AdAccountStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdCampaign {
+  id: string;
+  ad_account_id: string;
+  meta_campaign_id: string;
+  name: string;
+  objective: string | null;
+  status: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdSet {
+  id: string;
+  campaign_id: string;
+  ad_account_id: string;
+  meta_adset_id: string;
+  name: string;
+  status: string | null;
+  daily_budget: number | null;
+  lifetime_budget: number | null;
+  bid_strategy: string | null;
+  optimization_goal: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdSetInsightSnapshot {
+  id: string;
+  ad_account_id: string;
+  campaign_id: string;
+  ad_set_id: string;
+  captured_at: string;
+  date_start: string | null;
+  date_stop: string | null;
+  spend: number | null;
+  impressions: number | null;
+  clicks: number | null;
+  reach: number | null;
+  frequency: number | null;
+  ctr: number | null;
+  cpc: number | null;
+  cpm: number | null;
+  purchases: number | null;
+  purchase_value: number | null;
+  roas: number | null;
+  cpa: number | null;
+  result_type: string | null;
+  results: number | null;
+  raw: unknown;
+  created_at: string;
+}
+
+export type AdSyncRunStatus = 'running' | 'success' | 'partial' | 'failed';
+
+export interface AdSyncRun {
+  id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: AdSyncRunStatus;
+  accounts_synced: number;
+  ad_sets_synced: number;
+  error_message: string | null;
+  created_at: string;
+}
