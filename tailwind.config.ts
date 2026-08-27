@@ -10,7 +10,9 @@ const config: Config = {
         surface: '#f4f6f8',
         border: '#e2e8f0',
         accentBlue: '#2563eb',
-        accentGreen: '#16a34a'
+        accentGreen: '#16a34a',
+        // Ads Automation module only — matches the CRM's dark zinc-950 + gold theme.
+        gold: '#C8A96E'
       }
     }
   },

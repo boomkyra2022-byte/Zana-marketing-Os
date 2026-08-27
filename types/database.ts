@@ -237,3 +237,136 @@ export interface Winner {
   created_by: string | null;
   created_at: string;
 }
+
+// ============================================================
+// Ads Automation Bot — Phase 1 (see supabase/migrations/0014_ads_automation_phase1.sql)
+// ============================================================
+
+export type AdAccountStatus = 'active' | 'paused' | 'disabled';
+
+export interface AdAccount {
+  id: string;
+  meta_account_id: string;
+  name: string;
+  currency: string | null;
+  timezone_name: string | null;
+  business_id: string | null;
+  status: AdAccountStatus;
+  // Name of the Vault secret holding this account's Business Manager token.
+  // NULL falls back to the single META_SYSTEM_USER_TOKEN Edge Function secret.
+  meta_token_secret_name: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdCampaign {
+  id: string;
+  ad_account_id: string;
+  meta_campaign_id: string;
+  name: string;
+  objective: string | null;
+  status: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdSet {
+  id: string;
+  campaign_id: string;
+  ad_account_id: string;
+  meta_adset_id: string;
+  name: string;
+  status: string | null;
+  daily_budget: number | null;
+  lifetime_budget: number | null;
+  bid_strategy: string | null;
+  optimization_goal: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdSetInsightSnapshot {
+  id: string;
+  ad_account_id: string;
+  campaign_id: string;
+  ad_set_id: string;
+  captured_at: string;
+  date_start: string | null;
+  date_stop: string | null;
+  spend: number | null;
+  impressions: number | null;
+  clicks: number | null;
+  reach: number | null;
+  frequency: number | null;
+  ctr: number | null;
+  cpc: number | null;
+  cpm: number | null;
+  purchases: number | null;
+  purchase_value: number | null;
+  roas: number | null;
+  cpa: number | null;
+  result_type: string | null;
+  results: number | null;
+  raw: unknown;
+  created_at: string;
+}
+
+export type AdSyncRunStatus = 'running' | 'success' | 'partial' | 'failed';
+
+export interface AdSyncRun {
+  id: string;
+  started_at: string;
+  finished_at: string | null;
+  status: AdSyncRunStatus;
+  accounts_synced: number;
+  ad_sets_synced: number;
+  error_message: string | null;
+  created_at: string;
+}
+
+// ============================================================
+// Ads Automation Bot — Phase 2 (see supabase/migrations/0017_ads_rules_engine.sql)
+// ============================================================
+
+export type AdRuleMetric = 'roas' | 'cpa' | 'spend' | 'frequency' | 'ctr' | 'cpc';
+export type AdRuleOperator = '<' | '<=' | '>' | '>=' | '=';
+export type AdRuleAction = 'pause' | 'activate' | 'scale_budget';
+
+export interface AdAutomationRule {
+  id: string;
+  name: string;
+  // Scope: narrowest non-null wins. All null = applies to every ad set.
+  ad_account_id: string | null;
+  campaign_id: string | null;
+  ad_set_id: string | null;
+  metric: AdRuleMetric;
+  operator: AdRuleOperator;
+  threshold: number;
+  time_window_minutes: number;
+  action: AdRuleAction;
+  budget_change_percent: number | null; // required when action='scale_budget', capped ±20
+  cooldown_hours: number;
+  enabled: boolean;
+  priority: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdRuleExecution {
+  id: string;
+  rule_id: string;
+  ad_set_id: string;
+  triggered_at: string;
+  metric_value: number | null;
+  dry_run: boolean;
+  action_taken: string;
+  budget_before: number | null;
+  budget_after: number | null;
+  status_before: string | null;
+  status_after: string | null;
+  success: boolean | null; // null when dry_run
+  error_message: string | null;
+  reasoning: string;
+  created_at: string;
+}
