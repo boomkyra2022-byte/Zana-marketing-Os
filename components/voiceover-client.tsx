@@ -97,6 +97,12 @@ function saveCloneVoice(provider: Provider, voiceId: string, label: string) {
   window.localStorage.setItem(cloneVoicesStorageKey(provider), JSON.stringify(next));
 }
 
+function removeCloneVoiceFromStorage(provider: Provider, voiceId: string) {
+  if (typeof window === 'undefined') return;
+  const next = loadSavedCloneVoices(provider).filter((v) => v.voiceId !== voiceId);
+  window.localStorage.setItem(cloneVoicesStorageKey(provider), JSON.stringify(next));
+}
+
 interface HistoryItem {
   id: string;
   input_text: string;
@@ -265,25 +271,58 @@ export default function VoiceoverClient({ history: initialHistory }: Props) {
 
   async function saveAudioToDevice() {
     if (!result?.signedUrl) return;
+    setError('');
+
+    let blob: Blob;
+    const filename = `zana-voiceover-${Date.now()}.mp3`;
     try {
       const res = await fetch(result.signedUrl);
-      const blob = await res.blob();
-      const filename = `zana-voiceover-${Date.now()}.mp3`;
-      const file = new File([blob], filename, { type: blob.type || 'audio/mpeg' });
-
-      if (typeof navigator !== 'undefined' && navigator.share && navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: filename });
-      } else {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
+      blob = await res.blob();
     } catch (err: any) {
-      if (err instanceof Error && err.name === 'AbortError') return;
+      // Only the actual file fetch failing is a real download error worth
+      // surfacing — this part isn't what was breaking (confirmed via live
+      // testing: this fetch succeeds with 200 every time).
       setError(err?.message || 'ดาวน์โหลดไม่สำเร็จ');
+      return;
+    }
+
+    const file = new File([blob], filename, { type: blob.type || 'audio/mpeg' });
+
+    // Real bug found via live testing: navigator.share() (used so mobile
+    // users get the OS share sheet instead of a silent background download)
+    // can throw for reasons that have nothing to do with the file itself —
+    // e.g. "Permission denied" when the browser/OS blocks the share sheet,
+    // even though navigator.canShare() said it should work. The old code
+    // had one single try/catch around BOTH the share() call and the
+    // fallback, so any share() failure surfaced that raw native error
+    // ("Permission denied") to the user and never even attempted the
+    // fallback direct-download below. Now share() failures (other than the
+    // user deliberately cancelling the share sheet) fall through to the
+    // plain blob-download method instead of leaving the user stuck.
+    if (typeof navigator !== 'undefined' && navigator.share && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: filename });
+        return;
+      } catch (err: any) {
+        if (err instanceof Error && err.name === 'AbortError') return; // user cancelled the share sheet — not an error
+        // fall through to the direct download below
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function removeCloneVoice(p: Provider, voiceId: string) {
+    removeCloneVoiceFromStorage(p, voiceId);
+    setSavedClones(loadSavedCloneVoices(p));
+    if (cloneVoiceId === voiceId) {
+      setCloneVoiceId('');
+      setCloneVoiceLabel('');
     }
   }
 
@@ -375,50 +414,93 @@ export default function VoiceoverClient({ history: initialHistory }: Props) {
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
             <p className="text-xs text-gray-500">
-              ใส่ Voice ID ของเสียงโคลนที่สร้างไว้ใน {provider === 'elevenlabs' ? 'ElevenLabs' : 'MiniMax'} เอง (คัดลอกมาจากหน้า Voices ในบัญชีของคุณ) —
               ต้องตั้งค่า {provider === 'elevenlabs' ? 'ELEVENLABS_API_KEY' : 'MINIMAX_API_KEY'} ใน Vercel ไว้ก่อนถึงจะใช้งานได้
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="field-label">Voice ID *</label>
-                <input type="text" value={cloneVoiceId} onChange={(e) => setCloneVoiceId(e.target.value)} placeholder="วาง Voice ID ที่นี่" />
-              </div>
-              <div>
-                <label className="field-label">ชื่อเรียก (ไม่บังคับ)</label>
-                <input type="text" value={cloneVoiceLabel} onChange={(e) => setCloneVoiceLabel(e.target.value)} placeholder="เช่น เสียงฉัน (โทนขาย)" />
-              </div>
-            </div>
-            <button
-              type="button"
-              className="btn-secondary text-xs px-2 py-1"
-              disabled={!cloneVoiceId.trim() || previewingVoice === cloneVoiceId.trim()}
-              onClick={() => playClonePreview(cloneVoiceId)}
-            >
-              {previewingVoice === cloneVoiceId.trim() ? '...' : '▶ ฟังตัวอย่างเสียงนี้'}
-            </button>
 
             {savedClones.length > 0 && (
               <div>
-                <p className="text-xs text-gray-500 mb-1">เสียงที่เคยใช้ (บันทึกไว้ในเบราว์เซอร์นี้เท่านั้น)</p>
-                <div className="flex flex-wrap gap-2">
+                <label className="field-label">เลือกเสียงที่บันทึกไว้ *</label>
+                <p className="text-xs text-gray-500 mb-2">บันทึกไว้ในเบราว์เซอร์นี้เท่านั้น — กดการ์ดเพื่อเลือกใช้ กด ฟัง เพื่อฟังตัวอย่าง</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   {savedClones.map((sv) => (
-                    <button
+                    <div
                       key={sv.voiceId}
-                      type="button"
-                      className={`btn-secondary text-xs px-2 py-1 ${cloneVoiceId === sv.voiceId ? 'ring-2 ring-blue-500' : ''}`}
+                      className={`card p-3 flex items-center justify-between gap-2 cursor-pointer ${cloneVoiceId === sv.voiceId ? 'ring-2 ring-blue-500' : ''}`}
                       onClick={() => {
                         setCloneVoiceId(sv.voiceId);
                         setCloneVoiceLabel(sv.label);
                       }}
                     >
-                      {sv.label}
-                    </button>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{sv.label}</p>
+                        <p className="text-xs text-gray-500 truncate font-mono">{sv.voiceId}</p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          className="btn-secondary text-xs px-2 py-1"
+                          disabled={previewingVoice === sv.voiceId}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playClonePreview(sv.voiceId);
+                          }}
+                        >
+                          {previewingVoice === sv.voiceId ? '...' : '▶ ฟัง'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary text-xs px-2 py-1"
+                          title="ลบเสียงนี้ออกจากรายการ"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeCloneVoice(provider, sv.voiceId);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
             )}
+
+            <div className="card p-4 space-y-3">
+              <label className="field-label">{savedClones.length > 0 ? 'เพิ่มเสียงใหม่' : `ใส่ Voice ID ของเสียงโคลนที่สร้างไว้ใน ${provider === 'elevenlabs' ? 'ElevenLabs' : 'MiniMax'}`}</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="field-label">Voice ID *</label>
+                  <input type="text" value={cloneVoiceId} onChange={(e) => setCloneVoiceId(e.target.value)} placeholder="วาง Voice ID ที่นี่" />
+                </div>
+                <div>
+                  <label className="field-label">ชื่อเรียก (ไม่บังคับ)</label>
+                  <input type="text" value={cloneVoiceLabel} onChange={(e) => setCloneVoiceLabel(e.target.value)} placeholder="เช่น เสียงฉัน (โทนขาย)" />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn-secondary text-xs px-2 py-1"
+                  disabled={!cloneVoiceId.trim() || previewingVoice === cloneVoiceId.trim()}
+                  onClick={() => playClonePreview(cloneVoiceId)}
+                >
+                  {previewingVoice === cloneVoiceId.trim() ? '...' : '▶ ฟังตัวอย่างเสียงนี้'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary text-xs px-2 py-1"
+                  disabled={!cloneVoiceId.trim()}
+                  onClick={() => {
+                    saveCloneVoice(provider, cloneVoiceId, cloneVoiceLabel);
+                    setSavedClones(loadSavedCloneVoices(provider));
+                  }}
+                >
+                  บันทึกเสียงนี้ไว้ใช้ซ้ำ
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
