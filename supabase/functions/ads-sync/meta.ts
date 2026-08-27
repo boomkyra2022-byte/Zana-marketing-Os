@@ -1,11 +1,8 @@
-// Thin Meta Marketing API client for the ads-sync Edge Function.
-// Uses a System User access token (META_SYSTEM_USER_TOKEN) — never a
-// personal/short-lived user token.
+// Meta Marketing API read calls specific to the ads-sync Edge Function
+// (ad-set insights + ad-set metadata). Built on the shared HTTP client in
+// _shared/meta-client.ts — see that file for why token is passed explicitly.
 
-const META_API_VERSION = Deno.env.get('META_API_VERSION') ?? 'v21.0';
-const META_SYSTEM_USER_TOKEN = Deno.env.get('META_SYSTEM_USER_TOKEN');
-
-const BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
+import { metaGet } from '../_shared/meta-client.ts';
 
 export interface MetaAdSetInsight {
   ad_id?: string;
@@ -38,32 +35,9 @@ export interface MetaAdSetMeta {
   campaign_id: string;
 }
 
-function assertToken(): string {
-  if (!META_SYSTEM_USER_TOKEN) {
-    throw new Error('META_SYSTEM_USER_TOKEN is not set (Edge Function secret)');
-  }
-  return META_SYSTEM_USER_TOKEN;
-}
-
-async function metaGet<T>(path: string, params: Record<string, string>): Promise<T> {
-  const token = assertToken();
-  const url = new URL(`${BASE_URL}${path}`);
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
-  }
-  url.searchParams.set('access_token', token);
-
-  const res = await fetch(url.toString());
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Meta API error ${res.status} on ${path}: ${body}`);
-  }
-  return res.json() as Promise<T>;
-}
-
 // Ad-set-level insights (spend, ROAS ingredients, frequency, results) for
 // a single ad account, "today" attribution window.
-export async function fetchAdSetInsights(metaAccountId: string): Promise<MetaAdSetInsight[]> {
+export async function fetchAdSetInsights(metaAccountId: string, token: string): Promise<MetaAdSetInsight[]> {
   const fields = [
     'adset_id',
     'adset_name',
@@ -83,31 +57,33 @@ export async function fetchAdSetInsights(metaAccountId: string): Promise<MetaAdS
     'action_values'
   ].join(',');
 
-  const data = await metaGet<{ data: MetaAdSetInsight[] }>(`/${metaAccountId}/insights`, {
-    level: 'adset',
-    date_preset: 'today',
-    fields
-  });
+  const data = await metaGet<{ data: MetaAdSetInsight[] }>(
+    `/${metaAccountId}/insights`,
+    {
+      level: 'adset',
+      date_preset: 'today',
+      fields
+    },
+    token
+  );
   return data.data;
 }
 
 // Ad-set metadata (budget, status, optimization goal) — merged with
 // insights so ad_sets stays current even for ad sets with no spend today.
-export async function fetchAdSets(metaAccountId: string): Promise<MetaAdSetMeta[]> {
+export async function fetchAdSets(metaAccountId: string, token: string): Promise<MetaAdSetMeta[]> {
   const fields = ['id', 'name', 'status', 'daily_budget', 'lifetime_budget', 'bid_strategy', 'optimization_goal', 'campaign_id'].join(
     ','
   );
 
-  const data = await metaGet<{ data: MetaAdSetMeta[] }>(`/${metaAccountId}/adsets`, {
-    fields,
-    effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
-    limit: '500'
-  });
+  const data = await metaGet<{ data: MetaAdSetMeta[] }>(
+    `/${metaAccountId}/adsets`,
+    {
+      fields,
+      effective_status: JSON.stringify(['ACTIVE', 'PAUSED']),
+      limit: '500'
+    },
+    token
+  );
   return data.data;
-}
-
-export function sumActionValue(actions: { action_type: string; value: string }[] | undefined, type: string): number {
-  if (!actions) return 0;
-  const match = actions.find((a) => a.action_type === type);
-  return match ? Number(match.value) : 0;
 }

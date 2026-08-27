@@ -252,6 +252,9 @@ export interface AdAccount {
   timezone_name: string | null;
   business_id: string | null;
   status: AdAccountStatus;
+  // Name of the Vault secret holding this account's Business Manager token.
+  // NULL falls back to the single META_SYSTEM_USER_TOKEN Edge Function secret.
+  meta_token_secret_name: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -318,5 +321,52 @@ export interface AdSyncRun {
   accounts_synced: number;
   ad_sets_synced: number;
   error_message: string | null;
+  created_at: string;
+}
+
+// ============================================================
+// Ads Automation Bot — Phase 2 (see supabase/migrations/0017_ads_rules_engine.sql)
+// ============================================================
+
+export type AdRuleMetric = 'roas' | 'cpa' | 'spend' | 'frequency' | 'ctr' | 'cpc';
+export type AdRuleOperator = '<' | '<=' | '>' | '>=' | '=';
+export type AdRuleAction = 'pause' | 'activate' | 'scale_budget';
+
+export interface AdAutomationRule {
+  id: string;
+  name: string;
+  // Scope: narrowest non-null wins. All null = applies to every ad set.
+  ad_account_id: string | null;
+  campaign_id: string | null;
+  ad_set_id: string | null;
+  metric: AdRuleMetric;
+  operator: AdRuleOperator;
+  threshold: number;
+  time_window_minutes: number;
+  action: AdRuleAction;
+  budget_change_percent: number | null; // required when action='scale_budget', capped ±20
+  cooldown_hours: number;
+  enabled: boolean;
+  priority: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdRuleExecution {
+  id: string;
+  rule_id: string;
+  ad_set_id: string;
+  triggered_at: string;
+  metric_value: number | null;
+  dry_run: boolean;
+  action_taken: string;
+  budget_before: number | null;
+  budget_after: number | null;
+  status_before: string | null;
+  status_after: string | null;
+  success: boolean | null; // null when dry_run
+  error_message: string | null;
+  reasoning: string;
   created_at: string;
 }

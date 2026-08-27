@@ -14,6 +14,7 @@ import {
   getActiveAdAccounts,
   getServiceClient,
   insertInsightSnapshots,
+  resolveTokenForAccount,
   startSyncRun,
   upsertCampaignsAndAdSets
 } from './db.ts';
@@ -31,9 +32,10 @@ Deno.serve(async (_req) => {
 
     for (const account of accounts) {
       try {
+        const token = await resolveTokenForAccount(client, account);
         const [adSets, insights] = await Promise.all([
-          fetchAdSets(account.meta_account_id),
-          fetchAdSetInsights(account.meta_account_id)
+          fetchAdSets(account.meta_account_id, token),
+          fetchAdSetInsights(account.meta_account_id, token)
         ]);
 
         const campaignNamesById = new Map(insights.map((i) => [i.campaign_id, i.campaign_name]));

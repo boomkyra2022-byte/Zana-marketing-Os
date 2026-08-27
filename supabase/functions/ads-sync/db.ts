@@ -1,36 +1,19 @@
-// Supabase service-role client + upsert helpers for the ads-sync Edge Function.
-// SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are injected automatically into
-// every Edge Function by the Supabase runtime — no manual secret needed.
+// Supabase upsert/insert helpers specific to the ads-sync Edge Function.
+// Service client + account/token lookups now live in _shared/ — see
+// _shared/supabase-client.ts and _shared/accounts.ts.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
+import type { ServiceClient } from '../_shared/supabase-client.ts';
+import { sumActionValue } from '../_shared/meta-client.ts';
 import type { MetaAdSetInsight, MetaAdSetMeta } from './meta.ts';
-import { sumActionValue } from './meta.ts';
 
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-
-export function getServiceClient() {
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false }
-  });
-}
-
-export interface AdAccountRow {
-  id: string;
-  meta_account_id: string;
-  status: string;
-}
-
-export async function getActiveAdAccounts(client: ReturnType<typeof getServiceClient>): Promise<AdAccountRow[]> {
-  const { data, error } = await client.from('ad_accounts').select('id, meta_account_id, status').eq('status', 'active');
-  if (error) throw new Error(`getActiveAdAccounts: ${error.message}`);
-  return data ?? [];
-}
+export { getServiceClient } from '../_shared/supabase-client.ts';
+export { getActiveAdAccounts, resolveTokenForAccount } from '../_shared/accounts.ts';
+export type { AdAccountRow } from '../_shared/accounts.ts';
 
 // Upserts campaigns/ad sets discovered this run, returns id maps keyed by
 // the Meta-side id so the insight snapshot insert can resolve local uuids.
 export async function upsertCampaignsAndAdSets(
-  client: ReturnType<typeof getServiceClient>,
+  client: ServiceClient,
   adAccountUuid: string,
   adSets: MetaAdSetMeta[],
   campaignNamesById: Map<string, string>
@@ -88,7 +71,7 @@ export async function upsertCampaignsAndAdSets(
 }
 
 export async function insertInsightSnapshots(
-  client: ReturnType<typeof getServiceClient>,
+  client: ServiceClient,
   adAccountUuid: string,
   insights: MetaAdSetInsight[],
   campaignIdByMeta: Map<string, string>,
@@ -152,7 +135,7 @@ export async function startSyncRun(client: ReturnType<typeof getServiceClient>):
   return data.id;
 }
 
-export async function finishSyncRun(client: ReturnType<typeof getServiceClient>, runId: string, update: SyncRunUpdate) {
+export async function finishSyncRun(client: ServiceClient, runId: string, update: SyncRunUpdate) {
   const { error } = await client
     .from('ad_sync_runs')
     .update({ ...update, finished_at: new Date().toISOString() })
