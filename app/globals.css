@@ -101,3 +101,91 @@ input[type='radio'] {
 .top-nav-link:hover {
   color: white;
 }
+
+/* ============================================================
+   Ads Automation module — dark zinc-950 + gold theme, scoped to
+   .ads-theme only so the rest of the app (light theme) is untouched.
+   ============================================================ */
+.ads-theme {
+  background: #09090b; /* zinc-950 */
+  color: #e4e4e7; /* zinc-200 */
+  border-radius: 1rem;
+  padding: 1.5rem;
+}
+
+.ads-theme .ads-card {
+  background: #18181b; /* zinc-900 */
+  border: 1px solid #27272a; /* zinc-800 */
+  border-radius: 0.75rem;
+}
+
+.ads-theme .ads-btn-primary {
+  background: #c8a96e;
+  color: #18181b;
+  border-radius: 0.5rem;
+  padding: 0.6rem 1.1rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.ads-theme .ads-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ads-theme .ads-btn-secondary {
+  background: #18181b;
+  border: 1px solid #3f3f46; /* zinc-700 */
+  color: #e4e4e7;
+  border-radius: 0.5rem;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.95rem;
+}
+
+.ads-theme .ads-btn-danger {
+  background: transparent;
+  border: 1px solid #7f1d1d;
+  color: #fca5a5;
+  border-radius: 0.5rem;
+  padding: 0.6rem 1.1rem;
+  font-size: 0.95rem;
+}
+
+.ads-theme input:not([type='checkbox']):not([type='radio']),
+.ads-theme textarea,
+.ads-theme select {
+  background: #18181b;
+  border: 1px solid #3f3f46;
+  color: #e4e4e7;
+}
+
+.ads-theme .ads-field-label {
+  font-size: 0.85rem;
+  color: #a1a1aa; /* zinc-400 */
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 500;
+}
+
+.ads-theme table thead {
+  background: #18181b;
+  color: #a1a1aa;
+  text-align: left;
+}
+
+.ads-theme table tr {
+  border-top: 1px solid #27272a;
+}
+
+.ads-theme .ads-badge-gold {
+  color: #c8a96e;
+  border: 1px solid #c8a96e;
+  border-radius: 9999px;
+  padding: 0.1rem 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ads-theme .ads-muted {
+  color: #71717a; /* zinc-500 */
+}
