@@ -41,6 +41,7 @@ interface GenerateImagesOpts {
 
 interface EditImagesOpts extends GenerateImagesOpts {
   referenceImages: ReferenceImage[];
+  inputFidelity?: 'low' | 'high';
 }
 
 function getApiKey(): string {
@@ -125,6 +126,16 @@ export async function editImages(opts: EditImagesOpts): Promise<Buffer[]> {
   form.append('n', String(opts.n));
   form.append('size', opts.size || '1024x1024');
   form.append('quality', opts.quality || 'high');
+  // input_fidelity: 'high' tells gpt-image-1 to closely preserve fine
+  // detail from the reference image(s) (product shape/label/logo, or a
+  // face) instead of treating them as loose inspiration. Without this it
+  // defaults to 'low', which explains a real bug found via user testing:
+  // a batch of "same product" variations came back with visibly DIFFERENT
+  // pouch designs/colors per image instead of the same real product in
+  // different layouts — the model was redesigning the package each time
+  // instead of preserving it, which directly violates this tool's core
+  // rule ("ห้ามออกแบบขวด/ซอง/ฉลากใหม่").
+  form.append('input_fidelity', opts.inputFidelity || 'high');
   for (const ref of opts.referenceImages) {
     form.append('image[]', new Blob([new Uint8Array(ref.buffer)], { type: ref.contentType }), ref.filename);
   }

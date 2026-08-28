@@ -53,6 +53,7 @@ export default function BannerGeneratorClient({ history: initialHistory }: Props
   const [size, setSize] = useState<'1024x1024' | '1024x1536' | '1536x1024'>('1024x1024');
   const [refImages, setRefImages] = useState<{ name: string; dataUrl: string }[]>([]);
   const [reviewShot, setReviewShot] = useState<{ name: string; dataUrl: string } | null>(null);
+  const [styleRef, setStyleRef] = useState<{ name: string; dataUrl: string } | null>(null);
   const [generating, setGenerating] = useState(false);
   const [results, setResults] = useState<string[]>([]);
   const [error, setError] = useState('');
@@ -61,6 +62,7 @@ export default function BannerGeneratorClient({ history: initialHistory }: Props
   const [historyLoading, setHistoryLoading] = useState<string | null>(null);
   const refInputRef = useRef<HTMLInputElement | null>(null);
   const reviewInputRef = useRef<HTMLInputElement | null>(null);
+  const styleInputRef = useRef<HTMLInputElement | null>(null);
 
   const activeTemplate = BANNER_TEMPLATES.find((t) => t.value === template);
 
@@ -105,6 +107,22 @@ export default function BannerGeneratorClient({ history: initialHistory }: Props
     setRefImages((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  async function handleStyleRefFile(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    if (file.size > MAX_FILE_BYTES) {
+      setError(`ไฟล์ใหญ่เกินไป (สูงสุด ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB)`);
+      return;
+    }
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setStyleRef({ name: file.name, dataUrl });
+    } catch {
+      setError('อ่านไฟล์ตัวอย่างสไตล์ไม่สำเร็จ');
+    }
+    if (styleInputRef.current) styleInputRef.current.value = '';
+  }
+
   async function generate() {
     if (!productName.trim()) {
       setError('กรุณาใส่ชื่อสินค้า');
@@ -134,7 +152,8 @@ export default function BannerGeneratorClient({ history: initialHistory }: Props
           count,
           size,
           reference_images: refImages.map((r) => r.dataUrl),
-          review_screenshot: reviewShot?.dataUrl
+          review_screenshot: reviewShot?.dataUrl,
+          style_reference: styleRef?.dataUrl
         })
       });
       const json = await res.json();
@@ -215,7 +234,25 @@ export default function BannerGeneratorClient({ history: initialHistory }: Props
               ))}
             </div>
           )}
-          <p className="text-xs text-gray-500 mt-1">แนบได้สูงสุด {MAX_REF_IMAGES} ภาพ — ถ้าไม่แนบเลย ระบบจะสร้างภาพจากจินตนาการล้วนๆ (ไม่แนะนำถ้าต้องการให้ตรงกับสินค้าจริง)</p>
+          {refImages.length === 0 ? (
+            <p className="text-xs text-amber-600 mt-1">⚠ ยังไม่ได้แนบภาพสินค้า — ระบบจะสร้างสินค้าขึ้นจากจินตนาการล้วนๆ หน้าตาจะไม่ตรงกับสินค้าจริง แนะนำให้แนบก่อนสร้าง</p>
+          ) : (
+            <p className="text-xs text-gray-500 mt-1">แนบได้สูงสุด {MAX_REF_IMAGES} ภาพ — ระบบจะพยายามคงรูปทรง/ฉลาก/สีให้ตรงกับภาพนี้ในทุกเวอร์ชันที่สร้าง</p>
+          )}
+        </div>
+
+        <div>
+          <label className="field-label">ภาพตัวอย่างสไตล์ที่ต้องการ (ไม่บังคับ)</label>
+          <input ref={styleInputRef} type="file" accept="image/*" onChange={(e) => handleStyleRefFile(e.target.files)} />
+          {styleRef && (
+            <div className="flex items-center gap-2 card px-2 py-1 mt-2 w-fit">
+              <span className="text-xs truncate max-w-[180px]">{styleRef.name}</span>
+              <button type="button" className="text-xs text-red-600" onClick={() => setStyleRef(null)}>✕</button>
+            </div>
+          )}
+          <p className="text-xs text-gray-500 mt-1">
+            ถ้ามีภาพโฆษณาที่ชอบระดับความสวยงาม/Layout อยู่แล้ว (เช่นงานเก่าที่ทำไว้) แนบที่นี่ได้ — ระบบจะพยายามทำระดับความสวยและโครงสร้างให้ใกล้เคียง โดยยังใช้สินค้าจริงจากภาพด้านบน ไม่ลอกข้อความ/ราคาจากภาพตัวอย่าง
+          </p>
         </div>
 
         {activeTemplate?.needsTheme && (

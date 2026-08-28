@@ -29,17 +29,38 @@ export interface BannerPromptInput {
   theme?: string; // required for 'theme' template
   hasReviewShot?: boolean; // true when a review screenshot was attached (social_proof)
   extraNotes?: string; // free-text the user can add on top of the template
+  hasStyleReference?: boolean; // true when a separate "match this quality/layout" example image was attached
 }
+
+// Added after real user feedback comparing output against an actual
+// polished ZANA reference banner ("โมเดลที่สร้างภาพมันไม่สวยไม่คมเหมือน
+// แบบนี้เลย") — the team's original doc prompts (items 1–6) describe
+// creative STRATEGY (Visual Hook, Funnel, Pain→Benefit, etc.) but never
+// specified visual PRODUCTION quality, so the model defaulted to generic
+// "AI ad art" instead of the crisp, template-grade e-commerce graphic
+// design (gradient backgrounds, icon badges, bold clean Thai typography,
+// drop shadows, ribbon callouts) the team actually wants. This block is
+// new — not in the source doc — added specifically to close that gap.
+const ART_DIRECTION = `
+
+มาตรฐานงานออกแบบ (สำคัญมาก):
+- ต้องมีคุณภาพระดับกราฟิกมืออาชีพเทียบเท่าเทมเพลต Canva/Photoshop สำหรับแบรนด์พรีเมียม ไม่ใช่ภาพที่ดูเหมือน AI สร้างขึ้นมาลอยๆ
+- ใช้พื้นหลังไล่เฉด (Gradient) หรือองค์ประกอบกราฟิกที่สะอาดตา สอดคล้องกับโทนสีแบรนด์
+- ตัวอักษรหลักต้องคมชัด หนา อ่านง่าย จัดวางเป็นระเบียบ มีลำดับชั้นชัดเจน (Headline ใหญ่ รอง Subtext เล็กกว่า)
+- ถ้าเหมาะกับเทมเพลต ให้ใส่องค์ประกอบกราฟิกเสริม เช่น ไอคอนวงกลม (Icon Badge), ริบบิ้น/ป้ายมุม, เงาใต้สินค้า (Drop Shadow) เพื่อความน่าเชื่อถือ
+- สินค้าต้องดูคมชัด แสงสวย เหมือนถ่ายสตูดิโอมืออาชีพ ไม่เบลอ ไม่มีสิ่งแปลกปลอมบิดเบี้ยว
+- ห้ามให้ภาพดูหยาบ พิกเซลแตก หรือมีตัวอักษร/ไอคอนที่บิดเบี้ยวผิดรูป`;
 
 const SHARED_FOOTER = (input: BannerPromptInput) => `
 
 กติกาที่ต้องทำตามเสมอ:
-- ใช้สินค้าจริงจากภาพแนบเป็น Hero Product รักษารูปทรง สี ฉลาก โลโก้ ฝา ตัวอักษร และรายละเอียดแพ็กเกจให้ใกล้ต้นฉบับที่สุด
+- ใช้สินค้าจริงจากภาพแนบเป็น Hero Product รักษารูปทรง สี ฉลาก โลโก้ ฝา ตัวอักษร และรายละเอียดแพ็กเกจให้ใกล้ต้นฉบับที่สุดทุกภาพ (ถ้าขอหลายภาพ สินค้าต้องหน้าตาเหมือนกันทุกภาพ เปลี่ยนแค่ Layout/องค์ประกอบรอบๆ)
 - ห้ามออกแบบขวด/ซอง/ฉลากใหม่ ห้ามทำเป็น Packshot ธรรมดา
 - ข้อความบนภาพให้น้อย อ่านง่ายบนมือถือ มีลำดับชัด ต้องเป็นภาษาไทยที่ถูกต้อง ไม่สะกดผิด
 - หลีกเลี่ยงคำเคลมเกินจริงหรือข้อมูลที่ไม่มีหลักฐาน ห้ามใช้คำรับประกันผลลัพธ์
 ${input.priceOrPromo ? `- ราคา/โปรโมชั่นที่ต้องใช้ (ห้ามเปลี่ยนตัวเลข): ${input.priceOrPromo}` : '- ไม่ใส่ราคา/โปรโมชั่น เพราะยังไม่ได้ระบุ ห้ามแต่งราคาขึ้นเอง'}
-${input.extraNotes ? `- ข้อกำหนดเพิ่มเติมจากทีม: ${input.extraNotes}` : ''}`;
+${input.extraNotes ? `- ข้อกำหนดเพิ่มเติมจากทีม: ${input.extraNotes}` : ''}
+${input.hasStyleReference ? '- มีภาพตัวอย่าง "มาตรฐานความสวย/Layout ที่ต้องการ" แนบมาด้วย (ภาพสุดท้ายในชุดภาพที่แนบ) ให้เทียบระดับความสวย โทนกราฟิก และโครงสร้าง Layout จากภาพนั้น แต่ใช้สินค้าจริงจากภาพอ้างอิงสินค้า ห้ามลอกข้อความ/ราคาจากภาพตัวอย่างนั้น' : ''}${ART_DIRECTION}`;
 
 function buildProductAd(input: BannerPromptInput): string {
   return `วิเคราะห์ภาพสินค้าที่แนบก่อน แล้วสร้างภาพโฆษณาสำหรับ ${input.productName} ให้พร้อมใช้บน Social Media

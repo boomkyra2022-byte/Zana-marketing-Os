@@ -34,7 +34,14 @@ const requestSchema = z.object({
   reference_images: z.array(z.string().min(1)).max(3).default([]),
   // Extra screenshot for the social_proof template — kept separate from
   // reference_images so the prompt/UI can be explicit about what each one is.
-  review_screenshot: z.string().optional()
+  review_screenshot: z.string().optional(),
+  // Added after real user feedback ("โมเดลที่สร้างภาพมันไม่สวยไม่คมเหมือน
+  // แบบนี้เลย", attached an actual polished ZANA banner as the example) —
+  // an optional "match this design quality/layout" reference image, passed
+  // to the model as an ADDITIONAL edit-endpoint input alongside the product
+  // photo(s), with an explicit prompt instruction to copy the visual
+  // standard (not the text/price/product) from it.
+  style_reference: z.string().optional()
 });
 
 const MAX_TOTAL_REQUEST_BYTES = 4 * 1024 * 1024; // stay under Vercel's 4.5MB body cap with headroom
@@ -98,7 +105,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'กรุณาระบุธีม/เทศกาล' }, { status: 400 });
   }
 
-  const allRefsRaw = [...input.reference_images, ...(input.review_screenshot ? [input.review_screenshot] : [])];
+  // Order matters: buildBannerPrompt's style-reference instruction refers to
+  // it as "the last image in the attached set" — style_reference must stay
+  // last here to match that instruction.
+  const allRefsRaw = [
+    ...input.reference_images,
+    ...(input.review_screenshot ? [input.review_screenshot] : []),
+    ...(input.style_reference ? [input.style_reference] : [])
+  ];
   const totalBytesEstimate = allRefsRaw.reduce((sum, s) => sum + s.length * 0.75, 0);
   if (totalBytesEstimate > MAX_TOTAL_REQUEST_BYTES) {
     return NextResponse.json({ error: 'ไฟล์ภาพอ้างอิงรวมกันใหญ่เกินไป — ลองใช้ภาพที่มีขนาดเล็กลง' }, { status: 413 });
@@ -110,7 +124,8 @@ export async function POST(request: Request) {
       priceOrPromo: input.price_or_promo,
       theme: input.theme,
       hasReviewShot: Boolean(input.review_screenshot),
-      extraNotes: input.extra_notes
+      extraNotes: input.extra_notes,
+      hasStyleReference: Boolean(input.style_reference)
     });
 
     const referenceImages = allRefsRaw.map((dataUrl, i) => {
