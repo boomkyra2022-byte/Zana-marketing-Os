@@ -404,7 +404,7 @@ export default function BannerGeneratorClient({ history: initialHistory }: Props
           </button>
         </div>
         <p className="text-xs text-gray-500">
-          "วิเคราะห์สินค้า" ให้ AI ดูภาพและข้อมูล แล้วเสนอ Concept ที่เหมาะกับสินค้านี้ก่อน ค่อยเลือกว่าจะสร้างภาพไหน — "ข้ามขั้นตอน" คือสร้างภาพจริงจาก Concept
+          &ldquo;วิเคราะห์สินค้า&rdquo; ให้ AI ดูภาพและข้อมูล แล้วเสนอ Concept ที่เหมาะกับสินค้านี้ก่อน ค่อยเลือกว่าจะสร้างภาพไหน — &ldquo;ข้ามขั้นตอน&rdquo; คือสร้างภาพจริงจาก Concept
           มาตรฐานทั้ง 9 ทันทีโดยไม่ต้องรอ AI วิเคราะห์ก่อน
         </p>
       </div>
