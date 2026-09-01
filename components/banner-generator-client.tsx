@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { createProductQuick } from '@/app/(dashboard)/products/actions';
 
 // Banner/Ads Image Generator — v2, full two-phase rebuild. Explicit user
 // request: pasted their own "E-Commerce Visual Director" system prompt and
@@ -48,8 +49,40 @@ interface HistoryItem {
   created_at: string;
 }
 
+interface ProductRecord {
+  id: string;
+  product_name: string;
+  brand: string;
+  category?: string | null;
+  usp?: string | null;
+  ingredients?: string | null;
+  benefits?: string | null;
+  usage?: string | null;
+  allowed_claims?: string | null;
+  banned_claims?: string | null;
+  compliance_notes?: string | null;
+  selling_price?: number | null;
+  promotion_price?: number | null;
+}
+
+interface KnowledgeItemRecord {
+  id: string;
+  title: string;
+  type: string;
+  content: string;
+  product_ids?: string[] | null;
+}
+
 interface Props {
   history: HistoryItem[];
+  // Both optional — the standalone /banner-generator page (kept working but
+  // no longer linked from nav) doesn't pass these; the Creative Generator
+  // tab does. Explicit user request: pull existing Products/Knowledge Base
+  // data into this form as selectable options instead of retyping every
+  // time, with a way to save a genuinely new product straight into the
+  // catalog from here.
+  products?: ProductRecord[];
+  knowledgeItems?: KnowledgeItemRecord[];
 }
 
 interface AnalysisConcept {
@@ -77,9 +110,10 @@ interface GenerateResultItem {
   error?: string;
 }
 
-export default function BannerGeneratorClient({ history: initialHistory }: Props) {
+export default function BannerGeneratorClient({ history: initialHistory, products: initialProducts, knowledgeItems }: Props) {
   // Product facts — matches the system prompt's [INPUT] block field-for-field.
   const [productName, setProductName] = useState('');
+  const [brand, setBrand] = useState('');
   const [category, setCategory] = useState('');
   const [sellingPoints, setSellingPoints] = useState('');
   const [onPackText, setOnPackText] = useState('');
@@ -90,6 +124,14 @@ export default function BannerGeneratorClient({ history: initialHistory }: Props
   const [aspectRatio, setAspectRatio] = useState<'1024x1024' | '1024x1536' | '1536x1024'>('1024x1024');
   const [prohibitions, setProhibitions] = useState('');
   const [conceptCount, setConceptCount] = useState(9);
+
+  // Product/Knowledge Base picker — explicit user request: "อยากให้เพิ่มการนำ
+  // Knowledge base หรือ Product สินค้าแสดงเป็นตัวเลือกเพื่อจะได้ไม่ต้องกรอกใหม่
+  // และถ้าอันไหนเป็นสินค้าใหม่ ไม่มีในคลัง ให้กดเพิ่มข้อมูลใหม่ตามนี้เลยก็ได้".
+  const [products, setProducts] = useState<ProductRecord[]>(initialProducts || []);
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [savingProduct, setSavingProduct] = useState(false);
+  const [productSaveMsg, setProductSaveMsg] = useState('');
 
   const [refImages, setRefImages] = useState<{ name: string; dataUrl: string }[]>([]);
   const [styleRef, setStyleRef] = useState<{ name: string; dataUrl: string } | null>(null);
@@ -108,6 +150,88 @@ export default function BannerGeneratorClient({ history: initialHistory }: Props
   const [history, setHistory] = useState<HistoryItem[]>(initialHistory);
   const [historyImages, setHistoryImages] = useState<Record<string, string[]>>({});
   const [historyLoading, setHistoryLoading] = useState<string | null>(null);
+
+  function formatPrice(product: ProductRecord): string {
+    const promo = product.promotion_price;
+    const normal = product.selling_price;
+    if (promo && normal && promo !== normal) return `${promo} บาท (ราคาปกติ ${normal} บาท)`;
+    if (promo) return `${promo} บาท`;
+    if (normal) return `${normal} บาท`;
+    return '';
+  }
+
+  // Autofill from an existing Products row + any linked Knowledge Base
+  // entries (type PRODUCT = verified selling points, type COMPLIANCE =
+  // claim restrictions) — the two sources this was explicitly asked for.
+  // Fields with no matching column in `products` (on-pack text, age/size,
+  // registration number) are deliberately left as-is for the user to fill —
+  // no source of truth for those exists in the catalog, so nothing is
+  // invented here.
+  function applyProduct(productId: string) {
+    setSelectedProductId(productId);
+    setProductSaveMsg('');
+    if (!productId) return;
+    const p = products.find((x) => x.id === productId);
+    if (!p) return;
+
+    setProductName(p.product_name);
+    setBrand(p.brand || '');
+    setCategory(p.category || '');
+
+    const sellingPointParts: string[] = [];
+    if (p.usp) sellingPointParts.push(`จุดขายหลัก: ${p.usp}`);
+    if (p.benefits) sellingPointParts.push(`คุณประโยชน์: ${p.benefits}`);
+    if (p.ingredients) sellingPointParts.push(`ส่วนผสม: ${p.ingredients}`);
+    if (p.usage) sellingPointParts.push(`วิธีใช้: ${p.usage}`);
+
+    const prohibitionParts: string[] = [];
+    if (p.banned_claims) prohibitionParts.push(`ห้ามใช้ claim: ${p.banned_claims}`);
+    if (p.compliance_notes) prohibitionParts.push(`ข้อควรระวัง: ${p.compliance_notes}`);
+
+    const linkedKnowledge = (knowledgeItems || []).filter((k) => (k.product_ids || []).includes(productId));
+    for (const k of linkedKnowledge) {
+      if (k.type === 'PRODUCT') sellingPointParts.push(`[Knowledge Base — ${k.title}] ${k.content}`);
+      if (k.type === 'COMPLIANCE') prohibitionParts.push(`[Knowledge Base — ${k.title}] ${k.content}`);
+    }
+
+    setSellingPoints(sellingPointParts.join('\n'));
+    setProhibitions(prohibitionParts.join('\n'));
+    setPriceOrPromo(formatPrice(p));
+  }
+
+  async function saveNewProduct() {
+    if (!productName.trim() || !brand.trim()) {
+      setProductSaveMsg('กรุณากรอกชื่อสินค้าและแบรนด์ก่อนบันทึก');
+      return;
+    }
+    setSavingProduct(true);
+    setProductSaveMsg('');
+    try {
+      const result = await createProductQuick({
+        brand: brand.trim(),
+        product_name: productName.trim(),
+        category: category.trim() || null,
+        usp: sellingPoints.trim() || null,
+        allowed_claims: null,
+        banned_claims: null,
+        compliance_notes: prohibitions.trim() || null,
+        selling_price: null,
+        promotion_price: null
+      });
+      if ('error' in result) {
+        setProductSaveMsg(`บันทึกไม่สำเร็จ: ${result.error}`);
+        return;
+      }
+      const newProduct: ProductRecord = { id: result.id, product_name: result.product_name, brand: result.brand };
+      setProducts((prev) => [newProduct, ...prev]);
+      setSelectedProductId(result.id);
+      setProductSaveMsg(`บันทึก "${result.product_name}" เป็นสินค้าใหม่ในคลังแล้ว — ครั้งหน้าเลือกจากรายการได้เลย`);
+    } catch (err: any) {
+      setProductSaveMsg(err?.message || 'บันทึกไม่สำเร็จ');
+    } finally {
+      setSavingProduct(false);
+    }
+  }
 
   async function handleRefFiles(files: FileList | null) {
     if (!files) return;
@@ -290,9 +414,31 @@ export default function BannerGeneratorClient({ history: initialHistory }: Props
   return (
     <div className="space-y-6">
       <div className="card p-6 space-y-4">
-        <div>
-          <label className="field-label">ชื่อสินค้า *</label>
-          <input type="text" value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="เช่น KYRA Alpha 3+ Purple" />
+        {products.length > 0 && (
+          <div>
+            <label className="field-label">เลือกสินค้าจากคลัง (ไม่บังคับ — ไม่ต้องกรอกใหม่)</label>
+            <select value={selectedProductId} onChange={(e) => applyProduct(e.target.value)}>
+              <option value="">— กรอกข้อมูลสินค้าใหม่เอง —</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>{p.brand} — {p.product_name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              เลือกแล้วระบบจะดึงข้อมูลจาก Products และ Knowledge Base ที่เชื่อมกับสินค้านี้มาใส่ให้อัตโนมัติ (แก้ไขต่อได้) —
+              ยังต้องแนบรูปสินค้าเองอยู่ดี เพราะคลังสินค้ายังไม่ได้เก็บรูปไว้
+            </p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="field-label">ชื่อสินค้า *</label>
+            <input type="text" value={productName} onChange={(e) => setProductName(e.target.value)} placeholder="เช่น KYRA Alpha 3+ Purple" />
+          </div>
+          <div>
+            <label className="field-label">แบรนด์ {selectedProductId ? '' : '(ใส่ไว้เผื่อกด "บันทึกเป็นสินค้าใหม่")'}</label>
+            <input type="text" value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="เช่น ZANA, ZANA Kid, KYRA" />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -317,6 +463,20 @@ export default function BannerGeneratorClient({ history: initialHistory }: Props
           <label className="field-label">จุดเด่นที่ยืนยันได้</label>
           <textarea rows={2} value={sellingPoints} onChange={(e) => setSellingPoints(e.target.value)} placeholder="เฉพาะข้อมูลที่ยืนยันจริง — ระบบจะไม่แต่งสรรพคุณเพิ่มเอง" />
         </div>
+
+        {!selectedProductId && (
+          <div>
+            <button
+              type="button"
+              className="btn-secondary text-xs"
+              disabled={savingProduct || !productName.trim() || !brand.trim()}
+              onClick={saveNewProduct}
+            >
+              {savingProduct ? 'กำลังบันทึก...' : '＋ บันทึกเป็นสินค้าใหม่ในคลัง (Products)'}
+            </button>
+            {productSaveMsg && <p className="text-xs mt-1 text-gray-600">{productSaveMsg}</p>}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>

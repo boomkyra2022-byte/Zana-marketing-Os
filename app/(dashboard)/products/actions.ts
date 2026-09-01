@@ -70,6 +70,63 @@ export async function updateProduct(id: string, formData: FormData) {
   redirect('/products');
 }
 
+// Non-redirecting variant for use from client components that shouldn't
+// navigate away — explicit user request from the Banner Generator tool
+// ("ถ้าอันไหนเป็นสินค้าใหม่ ไม่มีในคลัง ให้กดเพิ่มข้อมูลใหม่ตามนี้เลยก็ได้"):
+// let a brand-new product typed into that form be saved straight into the
+// shared Products catalog without leaving the page. Same `products` table,
+// same RLS, just returns instead of redirecting.
+export interface QuickProductPayload {
+  brand: string;
+  product_name: string;
+  category?: string | null;
+  usp?: string | null;
+  ingredients?: string | null;
+  benefits?: string | null;
+  usage?: string | null;
+  allowed_claims?: string | null;
+  banned_claims?: string | null;
+  compliance_notes?: string | null;
+  selling_price?: number | null;
+  promotion_price?: number | null;
+}
+
+export async function createProductQuick(
+  payload: QuickProductPayload
+): Promise<{ id: string; product_name: string; brand: string } | { error: string }> {
+  const supabase = createClient();
+  const brand = payload.brand?.trim();
+  const productName = payload.product_name?.trim();
+  if (!brand || !productName) {
+    return { error: 'กรุณาระบุแบรนด์และชื่อสินค้าก่อนบันทึก' };
+  }
+
+  const { data, error } = await supabase
+    .from('products')
+    .insert({
+      brand,
+      product_name: productName,
+      category: payload.category || null,
+      usp: payload.usp || null,
+      ingredients: payload.ingredients || null,
+      benefits: payload.benefits || null,
+      usage: payload.usage || null,
+      allowed_claims: payload.allowed_claims || null,
+      banned_claims: payload.banned_claims || null,
+      compliance_notes: payload.compliance_notes || null,
+      selling_price: payload.selling_price ?? null,
+      promotion_price: payload.promotion_price ?? null,
+      status: 'active'
+    })
+    .select('id, product_name, brand')
+    .single();
+
+  if (error) return { error: error.message };
+  revalidatePath('/products');
+  revalidatePath('/creative-generator');
+  return data;
+}
+
 export async function deleteProduct(id: string) {
   const supabase = createClient();
   const { error } = await supabase.from('products').delete().eq('id', id);

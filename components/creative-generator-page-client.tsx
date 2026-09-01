@@ -21,13 +21,38 @@ import BannerGeneratorClient from '@/components/banner-generator-client';
 
 type PageTab = 'pipeline' | 'banner';
 
-interface Props {
-  products: { id: string; product_name: string; brand: string }[];
-  personas: { id: string; name: string }[];
-  bannerHistory: { id: string; product_name: string; template: string; image_count: number; created_at: string }[];
+interface ProductRecord {
+  id: string;
+  product_name: string;
+  brand: string;
+  category?: string | null;
+  usp?: string | null;
+  ingredients?: string | null;
+  benefits?: string | null;
+  usage?: string | null;
+  allowed_claims?: string | null;
+  banned_claims?: string | null;
+  compliance_notes?: string | null;
+  selling_price?: number | null;
+  promotion_price?: number | null;
 }
 
-export default function CreativeGeneratorPageClient({ products, personas, bannerHistory }: Props) {
+interface KnowledgeItemRecord {
+  id: string;
+  title: string;
+  type: string;
+  content: string;
+  product_ids?: string[] | null;
+}
+
+interface Props {
+  products: ProductRecord[];
+  personas: { id: string; name: string }[];
+  bannerHistory: { id: string; product_name: string; template: string; image_count: number; created_at: string }[];
+  knowledgeItems: KnowledgeItemRecord[];
+}
+
+export default function CreativeGeneratorPageClient({ products, personas, bannerHistory, knowledgeItems }: Props) {
   const [tab, setTab] = useState<PageTab>('pipeline');
 
   return (
@@ -52,7 +77,7 @@ export default function CreativeGeneratorPageClient({ products, personas, banner
       {tab === 'pipeline' ? (
         <CreativeGeneratorClient products={products} personas={personas} />
       ) : (
-        <BannerGeneratorClient history={bannerHistory} />
+        <BannerGeneratorClient history={bannerHistory} products={products} knowledgeItems={knowledgeItems} />
       )}
     </div>
   );

@@ -3,10 +3,28 @@ import CreativeGeneratorPageClient from '@/components/creative-generator-page-cl
 
 export default async function CreativeGeneratorPage() {
   const supabase = createClient();
-  const [{ data: products }, { data: personas }, { data: bannerHistory }] = await Promise.all([
-    supabase.from('products').select('id, product_name, brand').order('created_at', { ascending: false }),
+  const [{ data: products }, { data: personas }, { data: bannerHistory }, { data: knowledgeItems }] = await Promise.all([
+    // Extra columns beyond id/product_name/brand are for the Banner
+    // Generator's "เลือกสินค้าจากคลัง" autofill (explicit user request) —
+    // CreativeGeneratorClient only reads id/product_name/brand and ignores
+    // the rest, so this is safe to widen without touching that component.
+    supabase
+      .from('products')
+      .select(
+        'id, product_name, brand, category, usp, ingredients, benefits, usage, allowed_claims, banned_claims, compliance_notes, selling_price, promotion_price'
+      )
+      .order('created_at', { ascending: false }),
     supabase.from('personas').select('id, name').order('created_at', { ascending: false }),
-    supabase.from('banner_generator_jobs').select('id, product_name, template, image_count, created_at').order('created_at', { ascending: false }).limit(10)
+    supabase.from('banner_generator_jobs').select('id, product_name, template, image_count, created_at').order('created_at', { ascending: false }).limit(10),
+    // Same request: pull Knowledge Base facts linked to a product (verified
+    // selling points / compliance notes) so picking a product also surfaces
+    // anything the team has logged there, not just the Products table.
+    supabase
+      .from('knowledge_items')
+      .select('id, title, type, content, product_ids')
+      .in('type', ['PRODUCT', 'COMPLIANCE'])
+      .eq('status', 'active')
+      .limit(300)
   ]);
 
   return (
@@ -21,7 +39,12 @@ export default async function CreativeGeneratorPage() {
           ต้องมีสินค้าอย่างน้อย 1 รายการก่อน — ไปที่หน้า <a href="/products/new" className="text-accentBlue">Products</a> เพื่อเพิ่มสินค้า
         </div>
       ) : (
-        <CreativeGeneratorPageClient products={products ?? []} personas={personas ?? []} bannerHistory={bannerHistory ?? []} />
+        <CreativeGeneratorPageClient
+          products={products ?? []}
+          personas={personas ?? []}
+          bannerHistory={bannerHistory ?? []}
+          knowledgeItems={knowledgeItems ?? []}
+        />
       )}
     </div>
   );
