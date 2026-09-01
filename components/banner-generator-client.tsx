@@ -17,6 +17,12 @@ import { createProductQuick } from '@/app/(dashboard)/products/actions';
 const MAX_REF_IMAGES = 3;
 const MAX_FILE_BYTES = 3 * 1024 * 1024; // per-file cap, keeps total request well under Vercel's 4.5MB body limit
 
+// Must match the server's zod limits in app/api/tools/banner-generator/generate/route.ts
+// (productInfoShape) — kept as constants here so the textarea maxLength/
+// counters can't drift out of sync with what the API will actually accept.
+const SELLING_POINTS_MAX = 3000;
+const PROHIBITIONS_MAX = 2000;
+
 // Fallback concept list — mirrors [CONCEPT LOGIC] in the system prompt.
 // Used for the "ข้ามขั้นตอนวิเคราะห์ สร้าง Concept 1-9 ทันที" quick path,
 // and as the seed when the user wants to add a concept by hand.
@@ -194,9 +200,22 @@ export default function BannerGeneratorClient({ history: initialHistory, product
       if (k.type === 'COMPLIANCE') prohibitionParts.push(`[Knowledge Base — ${k.title}] ${k.content}`);
     }
 
-    setSellingPoints(sellingPointParts.join('\n'));
-    setProhibitions(prohibitionParts.join('\n'));
+    // Combining Products + multiple Knowledge Base entries can legitimately
+    // exceed the API's length limit — truncate defensively here (with a
+    // visible notice) instead of letting the user hit a raw "String must
+    // contain at most N character(s)" error on submit.
+    const combinedSellingPoints = sellingPointParts.join('\n');
+    const combinedProhibitions = prohibitionParts.join('\n');
+    const truncatedSelling = combinedSellingPoints.length > SELLING_POINTS_MAX;
+    const truncatedProhibitions = combinedProhibitions.length > PROHIBITIONS_MAX;
+
+    setSellingPoints(truncatedSelling ? combinedSellingPoints.slice(0, SELLING_POINTS_MAX) : combinedSellingPoints);
+    setProhibitions(truncatedProhibitions ? combinedProhibitions.slice(0, PROHIBITIONS_MAX) : combinedProhibitions);
     setPriceOrPromo(formatPrice(p));
+
+    if (truncatedSelling || truncatedProhibitions) {
+      setProductSaveMsg('⚠ ข้อมูลจากคลัง/Knowledge Base ยาวเกินขีดจำกัด ระบบตัดข้อความส่วนเกินออกให้อัตโนมัติ — ลองแก้ไขให้กระชับขึ้นก่อนสร้างภาพ');
+    }
   }
 
   async function saveNewProduct() {
@@ -461,7 +480,16 @@ export default function BannerGeneratorClient({ history: initialHistory, product
 
         <div>
           <label className="field-label">จุดเด่นที่ยืนยันได้</label>
-          <textarea rows={2} value={sellingPoints} onChange={(e) => setSellingPoints(e.target.value)} placeholder="เฉพาะข้อมูลที่ยืนยันจริง — ระบบจะไม่แต่งสรรพคุณเพิ่มเอง" />
+          <textarea
+            rows={3}
+            maxLength={SELLING_POINTS_MAX}
+            value={sellingPoints}
+            onChange={(e) => setSellingPoints(e.target.value)}
+            placeholder="เฉพาะข้อมูลที่ยืนยันจริง — ระบบจะไม่แต่งสรรพคุณเพิ่มเอง"
+          />
+          <p className={`text-xs mt-0.5 ${sellingPoints.length > SELLING_POINTS_MAX * 0.9 ? 'text-amber-600' : 'text-gray-400'}`}>
+            {sellingPoints.length.toLocaleString()} / {SELLING_POINTS_MAX.toLocaleString()} ตัวอักษร
+          </p>
         </div>
 
         {!selectedProductId && (
@@ -502,7 +530,16 @@ export default function BannerGeneratorClient({ history: initialHistory, product
 
         <div>
           <label className="field-label">ข้อห้ามเฉพาะงานนี้ (ไม่บังคับ)</label>
-          <input type="text" value={prohibitions} onChange={(e) => setProhibitions(e.target.value)} placeholder="เช่น ห้ามใส่โลโก้เดิม, ห้ามใส่ราคา, ห้าม redesign สินค้า" />
+          <textarea
+            rows={3}
+            maxLength={PROHIBITIONS_MAX}
+            value={prohibitions}
+            onChange={(e) => setProhibitions(e.target.value)}
+            placeholder="เช่น ห้ามใส่โลโก้เดิม, ห้ามใส่ราคา, ห้าม redesign สินค้า"
+          />
+          <p className={`text-xs mt-0.5 ${prohibitions.length > PROHIBITIONS_MAX * 0.9 ? 'text-amber-600' : 'text-gray-400'}`}>
+            {prohibitions.length.toLocaleString()} / {PROHIBITIONS_MAX.toLocaleString()} ตัวอักษร
+          </p>
         </div>
 
         <div>

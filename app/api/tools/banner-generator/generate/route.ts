@@ -37,17 +37,24 @@ import { AIProviderError, callOpenAIVisionJSON } from '@/lib/ai/openai';
 export const runtime = 'nodejs';
 export const maxDuration = 120;
 
+// Limits raised after a real user hit the wall: auto-filling from a
+// Product + linked Knowledge Base entries (the "เลือกสินค้าจากคลัง" picker)
+// can legitimately produce long selling-points/compliance text — a single
+// Knowledge Base COMPLIANCE note plus the product's own banned_claims/
+// compliance_notes easily exceeds a few hundred characters. Custom Thai
+// messages so a future overflow shows something readable instead of zod's
+// raw English "String must contain at most N character(s)".
 const productInfoShape = {
-  product_name: z.string().min(1, 'กรุณาใส่ชื่อสินค้า').max(200),
-  category: z.string().max(200).optional(),
-  selling_points: z.string().max(1000).optional(),
-  on_pack_text: z.string().max(1000).optional(),
-  age_size_qty: z.string().max(200).optional(),
-  registration_info: z.string().max(200).optional(),
-  price_or_promo: z.string().max(200).optional(),
+  product_name: z.string().min(1, 'กรุณาใส่ชื่อสินค้า').max(200, 'ชื่อสินค้ายาวเกินไป (สูงสุด 200 ตัวอักษร)'),
+  category: z.string().max(200, 'ประเภทสินค้ายาวเกินไป (สูงสุด 200 ตัวอักษร)').optional(),
+  selling_points: z.string().max(3000, 'จุดเด่นยาวเกินไป (สูงสุด 3000 ตัวอักษร) — ลองตัดข้อความที่ไม่จำเป็นออก').optional(),
+  on_pack_text: z.string().max(1500, 'ข้อความบนแพ็กยาวเกินไป (สูงสุด 1500 ตัวอักษร)').optional(),
+  age_size_qty: z.string().max(200, 'อายุ/ขนาด/ปริมาณยาวเกินไป (สูงสุด 200 ตัวอักษร)').optional(),
+  registration_info: z.string().max(300, 'เลขจดแจ้ง/ข้อมูลอ้างอิงยาวเกินไป (สูงสุด 300 ตัวอักษร)').optional(),
+  price_or_promo: z.string().max(300, 'ราคา/โปรโมชั่นยาวเกินไป (สูงสุด 300 ตัวอักษร)').optional(),
   marketplace: z.string().max(100).optional(),
   aspect_ratio: z.string().max(20).optional(),
-  prohibitions: z.string().max(500).optional(),
+  prohibitions: z.string().max(2000, 'ข้อห้ามยาวเกินไป (สูงสุด 2000 ตัวอักษร) — ลองตัดข้อความที่ไม่จำเป็นออก').optional(),
   // Product photos as data URLs — same base64-in-JSON pattern used
   // throughout this app (Video Analyzer frames, v1 banner reference_images).
   reference_images: z.array(z.string().min(1)).max(3).default([])
