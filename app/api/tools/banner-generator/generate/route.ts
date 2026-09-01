@@ -102,6 +102,15 @@ function toProductInfo(input: { product_name: string; category?: string; selling
   };
 }
 
+interface ConceptResult {
+  concept_id: number;
+  concept_name: string;
+  job_id: string | null;
+  created_at: string;
+  signed_urls: string[];
+  error?: string;
+}
+
 const analysisResultSchema = z.object({
   product_summary: z.string(),
   selling_points: z.array(z.string()).default([]),
@@ -270,26 +279,33 @@ export async function POST(request: Request) {
           .select('id, created_at')
           .single();
 
-        return {
+        const okResult: ConceptResult = {
           concept_id: concept.id,
           concept_name: concept.name,
           job_id: insertError ? null : saved?.id ?? null,
           created_at: saved?.created_at ?? new Date().toISOString(),
           signed_urls: uploaded.map((u) => u.signedUrl)
         };
+        return okResult;
       })
     );
 
-    const results = settled
-      .map((r, i) =>
-        r.status === 'fulfilled'
-          ? r.value
-          : { concept_id: input.concepts[i].id, concept_name: input.concepts[i].name, job_id: null, created_at: new Date().toISOString(), signed_urls: [], error: (r.reason as any)?.message || 'สร้างภาพ Concept นี้ไม่สำเร็จ' }
-      );
+    const results: ConceptResult[] = settled.map((r, i) =>
+      r.status === 'fulfilled'
+        ? r.value
+        : {
+            concept_id: input.concepts[i].id,
+            concept_name: input.concepts[i].name,
+            job_id: null,
+            created_at: new Date().toISOString(),
+            signed_urls: [],
+            error: (r.reason as any)?.message || 'สร้างภาพ Concept นี้ไม่สำเร็จ'
+          }
+    );
 
     const anySucceeded = results.some((r) => r.signed_urls.length > 0);
     if (!anySucceeded) {
-      const firstError = results.find((r: any) => r.error)?.error as string | undefined;
+      const firstError = results.find((r) => r.error)?.error;
       return NextResponse.json({ error: firstError || 'สร้างภาพไม่สำเร็จทุก Concept' }, { status: 502 });
     }
 
