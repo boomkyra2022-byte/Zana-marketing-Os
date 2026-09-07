@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { getRelevantCreativeContext } from '@/lib/ai/context';
+import { getOptionalCreativeContext } from '@/lib/ai/context';
 import { callOpenAIJSON, AIProviderError } from '@/lib/ai/openai';
 import { buildCaptionGeneratorPrompt, PROMPT_VERSION_CAPTION } from '@/prompts/caption-generator';
 
@@ -10,7 +10,9 @@ export const runtime = 'nodejs';
 const MAX_QUANTITY = 20;
 
 const requestSchema = z.object({
-  product_id: z.string().uuid(),
+  // Optional — explicit user request: allow generic brand-level captions for
+  // a product/service not yet in the Products catalog, not just per-SKU ones.
+  product_id: z.string().uuid().nullable().optional(),
   persona_id: z.string().uuid().nullable().optional(),
   quantity: z.number().int().min(1).max(MAX_QUANTITY),
   framework: z.enum(['STANDARD', 'ZANA']).default('STANDARD'),
@@ -47,8 +49,10 @@ export async function POST(request: Request) {
   }
   const input = parsed.data;
 
-  const ctx = await getRelevantCreativeContext(supabase, { productId: input.product_id, personaId: input.persona_id });
-  if (!ctx.product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+  const ctx = await getOptionalCreativeContext(supabase, { productId: input.product_id, personaId: input.persona_id });
+  // Only an error if a specific product WAS requested but not found — when
+  // product_id is omitted entirely, ctx.product is expected to be null.
+  if (input.product_id && !ctx.product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
 
   const { system, user: userPrompt } = buildCaptionGeneratorPrompt(
     {
@@ -96,7 +100,7 @@ export async function POST(request: Request) {
     entity_type: 'caption',
     entity_id: null,
     new_value: { provider: 'openai', model, prompt_version: PROMPT_VERSION_CAPTION, count: captions.length },
-    reason: `Generated ${captions.length} captions for product ${ctx.product.product_name}`
+    reason: `Generated ${captions.length} captions for ${ctx.product ? `product ${ctx.product.product_name}` : 'no specific product (brand-level)'}`
   });
 
   return NextResponse.json({ captions, provider: 'openai', model, prompt_version: PROMPT_VERSION_CAPTION });

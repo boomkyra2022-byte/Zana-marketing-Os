@@ -39,7 +39,13 @@ const FRAMEWORK_OPTIONS: { value: 'STANDARD' | 'ZANA'; label: string }[] = [
 ];
 
 export default function CaptionGeneratorClient({ products, personas }: Props) {
-  const [productId, setProductId] = useState(products[0]?.id ?? '');
+  // Default to "not specified" rather than the first product — explicit
+  // user request ("เพิ่มตัวเลือกแบบไม่ระบุด้วยเพื่อมีสินค้าหรือบริการอื่น
+  // เพิ่มเติมในการใช้งาน"): a product/service that isn't in the Products
+  // catalog yet (or a brand-level caption with no specific product) is a
+  // real, common case, not an edge case — so it shouldn't require picking
+  // some unrelated product first.
+  const [productId, setProductId] = useState('');
   const [personaId, setPersonaId] = useState('');
   const [framework, setFramework] = useState<'STANDARD' | 'ZANA'>('STANDARD');
   const [objective, setObjective] = useState('');
@@ -64,7 +70,7 @@ export default function CaptionGeneratorClient({ products, personas }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          product_id: productId,
+          product_id: productId || null,
           persona_id: personaId || null,
           quantity: effectiveQty,
           framework,
@@ -98,15 +104,20 @@ export default function CaptionGeneratorClient({ products, personas }: Props) {
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="field-label">สินค้า *</label>
+            <label className="field-label">สินค้า / บริการ (ไม่บังคับ)</label>
             <select value={productId} onChange={(e) => setProductId(e.target.value)}>
-              {products.length === 0 && <option value="">— ยังไม่มีสินค้า —</option>}
+              <option value="">— ไม่ระบุสินค้า/บริการ (แคปชั่นระดับแบรนด์) —</option>
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.brand} — {p.product_name}
                 </option>
               ))}
             </select>
+            {!productId && (
+              <p className="text-xs text-gray-500 mt-1">
+                ไม่ผูกกับสินค้าใดสินค้าหนึ่ง — AI จะเขียนแคปชั่นระดับแบรนด์จาก Knowledge Base (Brand/Content Rules) เท่านั้น ไม่อ้างอิงสรรพคุณเฉพาะสินค้า
+              </p>
+            )}
           </div>
           <div>
             <label className="field-label">Persona (ไม่บังคับ)</label>
@@ -181,7 +192,7 @@ export default function CaptionGeneratorClient({ products, personas }: Props) {
 
         {error && <div className="text-red-600 text-sm">{error}</div>}
 
-        <button className="btn-primary" disabled={!productId || effectiveQty < 1 || loading} onClick={handleGenerate}>
+        <button className="btn-primary" disabled={effectiveQty < 1 || loading} onClick={handleGenerate}>
           {loading ? 'กำลังคิดแคปชั่น...' : `คิด ${effectiveQty || ''} แคปชั่น`}
         </button>
       </div>
