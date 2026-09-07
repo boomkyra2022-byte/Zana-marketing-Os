@@ -51,9 +51,24 @@ interface Props {
   personas: { id: string; name: string }[];
   bannerHistory: { id: string; product_name: string; template: string; image_count: number; created_at: string }[];
   knowledgeItems: KnowledgeItemRecord[];
+  recentIdeas: any[];
+  recentScripts: any[];
+  recentStoryboards: any[];
+  initialIdea: any | null;
+  initialScript: any | null;
 }
 
-export default function CreativeGeneratorPageClient({ products, personas, bannerHistory, knowledgeItems }: Props) {
+export default function CreativeGeneratorPageClient({
+  products,
+  personas,
+  bannerHistory,
+  knowledgeItems,
+  recentIdeas,
+  recentScripts,
+  recentStoryboards,
+  initialIdea,
+  initialScript
+}: Props) {
   const [tab, setTab] = useState<PageTab>('pipeline');
 
   return (
@@ -82,7 +97,17 @@ export default function CreativeGeneratorPageClient({ products, personas, banner
         </button>
       </div>
 
-      {tab === 'pipeline' && <CreativeGeneratorClient products={products} personas={personas} />}
+      {tab === 'pipeline' && (
+        <CreativeGeneratorClient
+          products={products}
+          personas={personas}
+          recentIdeas={recentIdeas}
+          recentScripts={recentScripts}
+          recentStoryboards={recentStoryboards}
+          initialIdea={initialIdea}
+          initialScript={initialScript}
+        />
+      )}
       {tab === 'banner' && <BannerGeneratorClient history={bannerHistory} products={products} knowledgeItems={knowledgeItems} />}
       {tab === 'caption' && <CaptionGeneratorClient products={products} personas={personas} />}
     </div>

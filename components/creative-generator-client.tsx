@@ -7,6 +7,16 @@ import type { Idea, Script, Storyboard, StoryboardScene } from '@/types/database
 interface Props {
   products: { id: string; product_name: string; brand: string }[];
   personas: { id: string; name: string }[];
+  // History/reuse — explicit user request: "ที่ Gen ไปแล้วยังขาด History หรือเปล่า
+  // สำหรับย้อนดูงานได้ หรือเลือกนำกลับมาใช้อีกครั้ง". Recent-20 lists fetched
+  // server-side (app/(dashboard)/creative-generator/page.tsx); a full
+  // searchable archive is the separate /content-library page.
+  recentIdeas?: Idea[];
+  recentScripts?: Script[];
+  recentStoryboards?: Storyboard[];
+  // Deep-link reuse from /content-library ("ใช้ต่อ" there → ?load_idea=/?load_script=)
+  initialIdea?: Idea | null;
+  initialScript?: Script | null;
 }
 
 const FUNNEL_OPTIONS = ['Awareness', 'Consideration', 'Conversion', 'Retention', 'ZANA Framework'];
@@ -25,8 +35,18 @@ function downloadFile(filename: string, content: string, mime: string) {
   URL.revokeObjectURL(url);
 }
 
-export default function CreativeGeneratorClient({ products, personas }: Props) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+export default function CreativeGeneratorClient({
+  products,
+  personas,
+  recentIdeas = [],
+  recentScripts = [],
+  recentStoryboards = [],
+  initialIdea = null,
+  initialScript = null
+}: Props) {
+  // Jump straight to the relevant step when arriving via a "ใช้ต่อ" deep
+  // link from /content-library, otherwise start at Step 1 as normal.
+  const [step, setStep] = useState<1 | 2 | 3>(initialScript ? 2 : 1);
 
   // Step 1 state
   const [productId, setProductId] = useState(products[0]?.id ?? '');
@@ -39,18 +59,20 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
   const [brief, setBrief] = useState('');
   const [ideaQty, setIdeaQty] = useState(10);
   const [ideaQtyCustom, setIdeaQtyCustom] = useState('');
-  const [ideas, setIdeas] = useState<Idea[]>([]);
-  const [selectedIdeaIds, setSelectedIdeaIds] = useState<Set<string>>(new Set());
+  const [ideas, setIdeas] = useState<Idea[]>(initialIdea ? [initialIdea] : []);
+  const [selectedIdeaIds, setSelectedIdeaIds] = useState<Set<string>>(new Set(initialIdea ? [initialIdea.id] : []));
   const [loadingIdeas, setLoadingIdeas] = useState(false);
   const [ideaError, setIdeaError] = useState('');
+  const [showIdeaHistory, setShowIdeaHistory] = useState(false);
 
   // Step 2 state
   const [scriptQty, setScriptQty] = useState(1);
   const [scriptQtyCustom, setScriptQtyCustom] = useState('');
-  const [scripts, setScripts] = useState<Script[]>([]);
-  const [selectedScriptIds, setSelectedScriptIds] = useState<Set<string>>(new Set());
+  const [scripts, setScripts] = useState<Script[]>(initialScript ? [initialScript] : []);
+  const [selectedScriptIds, setSelectedScriptIds] = useState<Set<string>>(new Set(initialScript ? [initialScript.id] : []));
   const [loadingScripts, setLoadingScripts] = useState(false);
   const [scriptError, setScriptError] = useState('');
+  const [showScriptHistory, setShowScriptHistory] = useState(false);
 
   // Step 3 state
   const [sceneCount, setSceneCount] = useState(6);
@@ -60,6 +82,28 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
   const [storyboards, setStoryboards] = useState<Storyboard[]>([]);
   const [loadingStoryboards, setLoadingStoryboards] = useState(false);
   const [storyboardError, setStoryboardError] = useState('');
+  const [showStoryboardHistory, setShowStoryboardHistory] = useState(false);
+
+  function productLabel(productId: string | null | undefined) {
+    const p = products.find((pr) => pr.id === productId);
+    return p ? `${p.brand} — ${p.product_name}` : null;
+  }
+
+  function applyIdeaFromHistory(idea: Idea) {
+    setIdeas((prev) => (prev.some((i) => i.id === idea.id) ? prev : [idea, ...prev]));
+    setSelectedIdeaIds((prev) => new Set(prev).add(idea.id));
+  }
+
+  function applyScriptFromHistory(s: Script) {
+    setScripts((prev) => (prev.some((x) => x.id === s.id) ? prev : [s, ...prev]));
+    setSelectedScriptIds((prev) => new Set(prev).add(s.id));
+    setStep(2);
+  }
+
+  function applyStoryboardFromHistory(sb: Storyboard) {
+    setStoryboards((prev) => (prev.some((x) => x.id === sb.id) ? prev : [sb, ...prev]));
+    setStep(3);
+  }
 
   const effectiveIdeaQty = ideaQtyCustom ? parseInt(ideaQtyCustom, 10) || 0 : ideaQty;
   const effectiveScriptQty = scriptQtyCustom ? parseInt(scriptQtyCustom, 10) || 0 : scriptQty;
@@ -212,12 +256,17 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
     <div className="space-y-6">
       <div className="flex gap-2 text-sm">
         {(['1. Idea', '2. Script', '3. Storyboard'] as const).map((label, i) => (
-          <div
+          <button
             key={label}
-            className={`px-3 py-1.5 rounded-full border ${step === i + 1 ? 'bg-navy text-white border-navy' : 'border-border text-gray-500'}`}
+            type="button"
+            // Free navigation between steps — needed so history/reuse in Step
+            // 2/3 is reachable even before anything's been generated this
+            // session, not just as a "next" progression.
+            onClick={() => setStep((i + 1) as 1 | 2 | 3)}
+            className={`px-3 py-1.5 rounded-full border ${step === i + 1 ? 'bg-navy text-white border-navy' : 'border-border text-gray-500 hover:text-gray-700'}`}
           >
             {label}
-          </div>
+          </button>
         ))}
       </div>
 
@@ -338,6 +387,39 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
             {loadingIdeas ? 'กำลังสร้าง Idea...' : `สร้าง ${effectiveIdeaQty || ''} Idea`}
           </button>
 
+          {recentIdeas.length > 0 && (
+            <div className="border-t border-border pt-3">
+              <button type="button" className="text-sm font-semibold text-gray-600 flex items-center gap-1" onClick={() => setShowIdeaHistory((v) => !v)}>
+                {showIdeaHistory ? '▾' : '▸'} ประวัติ Idea ล่าสุด ({recentIdeas.length})
+              </button>
+              {showIdeaHistory && (
+                <div className="mt-2 space-y-2 max-h-[360px] overflow-y-auto">
+                  {recentIdeas.map((idea) => (
+                    <div key={idea.id} className="card p-3 flex gap-3 items-start bg-surface">
+                      <div className="flex-1 text-sm">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold">{idea.title}</span>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-white border border-border">{idea.funnel_stage}</span>
+                          {idea.framework === 'ZANA' && (
+                            <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'var(--accent-strategy-tint)', color: 'var(--accent-strategy)' }}>
+                              ZANA Framework
+                            </span>
+                          )}
+                          {productLabel(idea.product_id) && <span className="text-xs text-gray-400">{productLabel(idea.product_id)}</span>}
+                        </div>
+                        <div className="text-gray-600 mt-1">Hook: {idea.hook}</div>
+                        <div className="text-gray-400 text-xs mt-1">{new Date(idea.created_at).toLocaleString('th-TH')}</div>
+                      </div>
+                      <button type="button" className="btn-secondary !px-2 !py-1 !text-xs whitespace-nowrap" onClick={() => applyIdeaFromHistory(idea)}>
+                        ↩ ใช้ต่อ
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {ideas.length > 0 && (
             <div className="mt-4 space-y-2">
               <div className="flex items-center justify-between">
@@ -407,6 +489,10 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
             <button className="btn-secondary" onClick={() => setStep(1)}>← กลับไป Idea</button>
           </div>
 
+          {scripts.length === 0 && (
+            <div className="card p-6 text-center text-gray-500 text-sm">ยังไม่มี Script ที่สร้างในเซสชันนี้ — เลือกจากประวัติด้านล่าง หรือกลับไป Step 1 เพื่อสร้างใหม่</div>
+          )}
+
           <div className="space-y-3 max-h-[500px] overflow-y-auto">
             {scripts.map((s) => (
               <div key={s.id} className="card p-4">
@@ -460,6 +546,38 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
             ))}
           </div>
 
+          {recentScripts.length > 0 && (
+            <div className="border-t border-border pt-3">
+              <button type="button" className="text-sm font-semibold text-gray-600 flex items-center gap-1" onClick={() => setShowScriptHistory((v) => !v)}>
+                {showScriptHistory ? '▾' : '▸'} ประวัติ Script ล่าสุด ({recentScripts.length})
+              </button>
+              {showScriptHistory && (
+                <div className="mt-2 space-y-2 max-h-[360px] overflow-y-auto">
+                  {recentScripts.map((s) => (
+                    <div key={s.id} className="card p-3 flex gap-3 items-start bg-surface">
+                      <div className="flex-1 text-sm">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold">{s.title}</span>
+                          {s.framework === 'ZANA' && (
+                            <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{ background: 'var(--accent-strategy-tint)', color: 'var(--accent-strategy)' }}>
+                              ZANA Framework
+                            </span>
+                          )}
+                          <span className="text-xs text-accentGreen font-semibold">score {s.score}/100</span>
+                        </div>
+                        <div className="text-gray-600 mt-1 line-clamp-2">{s.full_script}</div>
+                        <div className="text-gray-400 text-xs mt-1">{new Date(s.created_at).toLocaleString('th-TH')}</div>
+                      </div>
+                      <button type="button" className="btn-secondary !px-2 !py-1 !text-xs whitespace-nowrap" onClick={() => applyScriptFromHistory(s)}>
+                        ↩ ใช้ต่อ
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4 pt-2 border-t border-border">
             <div>
               <label className="field-label">จำนวน Scene ต่อคลิป</label>
@@ -497,6 +615,36 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
               <button className="btn-secondary" onClick={() => downloadFile('storyboards.md', exportMarkdown(), 'text/markdown')}>Export Markdown</button>
             </div>
           </div>
+
+          {recentStoryboards.length > 0 && (
+            <div className="card p-4">
+              <button type="button" className="text-sm font-semibold text-gray-600 flex items-center gap-1" onClick={() => setShowStoryboardHistory((v) => !v)}>
+                {showStoryboardHistory ? '▾' : '▸'} ประวัติ Storyboard ล่าสุด ({recentStoryboards.length})
+              </button>
+              {showStoryboardHistory && (
+                <div className="mt-2 space-y-2 max-h-[360px] overflow-y-auto">
+                  {recentStoryboards.map((sb) => (
+                    <div key={sb.id} className="card p-3 flex gap-3 items-start bg-surface">
+                      <div className="flex-1 text-sm">
+                        <span className="font-semibold">{sb.title ?? '(no title)'}</span>
+                        <span className="text-gray-500 text-xs ml-2">
+                          {sb.total_duration_sec}s · {sb.scene_count} scenes · {sb.tone_mood}
+                        </span>
+                        <div className="text-gray-400 text-xs mt-1">{new Date(sb.created_at).toLocaleString('th-TH')}</div>
+                      </div>
+                      <button type="button" className="btn-secondary !px-2 !py-1 !text-xs whitespace-nowrap" onClick={() => applyStoryboardFromHistory(sb)}>
+                        ↩ ใช้ต่อ
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {storyboards.length === 0 && (
+            <div className="card p-6 text-center text-gray-500 text-sm">ยังไม่มี Storyboard ที่สร้างในเซสชันนี้ — เลือกจากประวัติด้านบน หรือกลับไป Step 2 เพื่อสร้างใหม่</div>
+          )}
 
           {storyboards.map((sb, i) => (
             <div key={sb.id} className="card p-4 overflow-x-auto">

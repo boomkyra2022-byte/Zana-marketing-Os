@@ -44,6 +44,7 @@ export const NAV_GROUPS: NavGroup[] = [
     slug: 'strategy',
     items: [
       { href: '/creative-generator', label: 'Creative Generator' },
+      { href: '/content-library', label: 'Content Library' },
       { href: '/flow-prompt', label: 'Flow Prompt Director' },
       { href: '/products', label: 'Products' },
       { href: '/personas', label: 'Personas' }
