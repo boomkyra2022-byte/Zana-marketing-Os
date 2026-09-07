@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import CreativeGeneratorClient from '@/components/creative-generator-client';
 import BannerGeneratorClient from '@/components/banner-generator-client';
+import CaptionGeneratorClient from '@/components/caption-generator-client';
 
 // Explicit user request: "เพิ่มลงในหน้านี้ได้ไหม
 // https://os.zanadynasty.site/creative-generator ทำเป็นอีก 1 หัวข้อ" — the
@@ -19,7 +20,7 @@ import BannerGeneratorClient from '@/components/banner-generator-client';
 // still works standalone too — this tab renders the exact same client
 // component, not a copy, so there's only one implementation to maintain.
 
-type PageTab = 'pipeline' | 'banner';
+type PageTab = 'pipeline' | 'banner' | 'caption';
 
 interface ProductRecord {
   id: string;
@@ -72,13 +73,18 @@ export default function CreativeGeneratorPageClient({ products, personas, banner
         >
           สร้างภาพโฆษณา AI
         </button>
+        <button
+          type="button"
+          className={`btn-secondary ${tab === 'caption' ? 'ring-2 ring-blue-500' : ''}`}
+          onClick={() => setTab('caption')}
+        >
+          คิดแคปชั่น
+        </button>
       </div>
 
-      {tab === 'pipeline' ? (
-        <CreativeGeneratorClient products={products} personas={personas} />
-      ) : (
-        <BannerGeneratorClient history={bannerHistory} products={products} knowledgeItems={knowledgeItems} />
-      )}
+      {tab === 'pipeline' && <CreativeGeneratorClient products={products} personas={personas} />}
+      {tab === 'banner' && <BannerGeneratorClient history={bannerHistory} products={products} knowledgeItems={knowledgeItems} />}
+      {tab === 'caption' && <CaptionGeneratorClient products={products} personas={personas} />}
     </div>
   );
 }

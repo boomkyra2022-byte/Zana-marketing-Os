@@ -341,6 +341,14 @@ Context: user wants a 5th Funnel Stage option, "ZANA Framework", that is really 
 - [ ] **Not yet run to completion**: `npm run typecheck` (passed cleanly), `npm run build` (was failing on the Windows-only bug above, fix not yet re-verified), or the Supabase migration — no shell access this session. Exact commands handed to the user to run locally before commit/push.
 - [ ] **Not yet tested end-to-end** (Test 1-7 from the spec) — needs the migration applied first, then a real generate-ideas call with Funnel Stage = "ZANA Framework" against a live product.
 
+## Caption Generator — 3rd tab on Creative Generator (explicit user request: "ในช่องด้านบนตัวเลือกข้าง → สร้างภาพโฆษณา ให้เพิ่ม → คิดแคปชั่น Caption")
+Context: standalone caption ideation tool, same relationship to the page as the Banner/Ads Image Generator tab — not a 4th step chained onto Idea→Script→Storyboard, a separate quick tool for when someone just wants caption options.
+- [x] `prompts/caption-generator.ts` (new) — same Caption Writing Rules as the Script Generator (no robotic openers, situation-first, no inline Hook:/Problem: labels) plus an optional ZANA Framework mode, grounded via the existing `getRelevantCreativeContext` (Product Truth → Allowed Claims/Compliance → Persona → Knowledge Base → Winners), consistent with every other generator in the app.
+- [x] `app/api/creative/captions/generate/route.ts` (new, 15th route.ts — Vercel Hobby function count still has headroom per the last 2 deploys, worth a glance at the next build log anyway) — stateless by design (not part of the Idea/Script pipeline, so nothing new to persist); still logs to `activity_logs` for consistency. Returns `{hook, caption, hashtags, angle}[]`.
+- [x] `components/caption-generator-client.tsx` (new) — product/persona/framework/objective/platform/promotion/brief inputs, quantity presets, results list each with a Copy Caption button (hashtags appended on copy) and a small "angle" tag so the N options are visibly distinct, not near-duplicates.
+- [x] `components/creative-generator-page-client.tsx` — added "คิดแคปชั่น" as a 3rd tab alongside "Idea → Script → Storyboard" and "สร้างภาพโฆษณา AI".
+- [ ] Not yet tested end-to-end (needs the pending `npm run build` + push + deploy first, same as ZANA Framework above).
+
 ## Phase 5 — QA / Deploy
 - [ ] Security: server-side keys only, RLS review, signed/private storage, Drive URL validation, filename sanitization, file size limits, timeouts, AI rate limits
 - [ ] Hide/archive any leftover V1-only routes instead of deleting (non-destructive)

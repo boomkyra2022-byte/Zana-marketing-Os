@@ -31,7 +31,7 @@ export default async function CreativeGeneratorPage() {
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Creative Generator</h1>
-        <p className="text-gray-500">Idea → Script → Storyboard ต่อเนื่องเป็นขั้นตอน หรือสร้างภาพโฆษณา AI แยกเดี่ยว</p>
+        <p className="text-gray-500">Idea → Script → Storyboard ต่อเนื่องเป็นขั้นตอน, สร้างภาพโฆษณา AI แยกเดี่ยว, หรือคิดแคปชั่นแยกเดี่ยว</p>
       </div>
 
       {(products?.length ?? 0) === 0 ? (
