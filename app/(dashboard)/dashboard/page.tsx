@@ -153,18 +153,20 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* 4 quadrants */}
+      {/* 4 quadrants — colors match the sidebar's group accents (see
+          app/globals.css .section-{slug} / .sidebar-group-{slug}) so the
+          same category reads the same color everywhere in the app. */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        <a href="/knowledge" className="card p-5 block hover:ring-2 hover:ring-accentBlue">
-          <div className="text-xs text-gray-400 font-semibold mb-1">01 · INTELLIGENCE</div>
+        <a href="/knowledge" className="card section-card section-intelligence p-5 block hover:shadow-md transition-shadow">
+          <div className="text-xs font-semibold mb-1" style={{ color: 'var(--accent-intelligence)' }}>01 · INTELLIGENCE</div>
           <h2 className="text-lg font-semibold mb-2">รู้เทรนด์ + Insight สินค้า</h2>
           <p className="text-3xl font-bold">{knowledgeCount}</p>
           <p className="text-gray-500 text-sm">รายการใน Knowledge Base (Winners / Learnings / Compliance)</p>
           <p className="text-xs text-gray-400 mt-2">ส่องคู่แข่ง: ใช้สกิล /spy สั่งเองตอนนี้ได้เลย — ยังไม่ใช่ระบบดึงอัตโนมัติรายสัปดาห์</p>
         </a>
 
-        <a href="/creative-generator" className="card p-5 block hover:ring-2 hover:ring-accentBlue">
-          <div className="text-xs text-gray-400 font-semibold mb-1">02 · STRATEGY</div>
+        <a href="/creative-generator" className="card section-card section-strategy p-5 block hover:shadow-md transition-shadow">
+          <div className="text-xs font-semibold mb-1" style={{ color: 'var(--accent-strategy)' }}>02 · STRATEGY</div>
           <h2 className="text-lg font-semibold mb-2">วางแผน Hook + คอนเทนต์</h2>
           <div className="grid grid-cols-3 gap-2 text-center">
             <div><p className="text-2xl font-bold">{ideas}</p><p className="text-xs text-gray-500">Ideas</p></div>
@@ -173,8 +175,8 @@ export default async function DashboardPage() {
           </div>
         </a>
 
-        <a href="/editor" className="card p-5 block hover:ring-2 hover:ring-accentBlue">
-          <div className="text-xs text-gray-400 font-semibold mb-1">03 · DISTRIBUTION</div>
+        <a href="/editor" className="card section-card section-distribution p-5 block hover:shadow-md transition-shadow">
+          <div className="text-xs font-semibold mb-1" style={{ color: 'var(--accent-distribution)' }}>03 · DISTRIBUTION</div>
           <h2 className="text-lg font-semibold mb-2">ผลิตชิ้นงานพร้อมโพสต์</h2>
           <div className="grid grid-cols-3 gap-2 text-center">
             <div><p className="text-2xl font-bold">{editorJobsCount}</p><p className="text-xs text-gray-500">Editor</p></div>
@@ -184,20 +186,20 @@ export default async function DashboardPage() {
           <p className="text-xs text-gray-400 mt-2">⚠ ยังไม่มีระบบโพสต์อัตโนมัติขึ้น FB/IG/TikTok — ต้องโพสต์เองหรือใช้เครื่องมือ schedule ภายนอก</p>
         </a>
 
-        <a href="/ads" className="card p-5 block hover:ring-2 hover:ring-accentBlue">
-          <div className="text-xs text-gray-400 font-semibold mb-1">04 · ANALYTICS</div>
+        <a href="/ads" className="card section-card section-analytics p-5 block hover:shadow-md transition-shadow">
+          <div className="text-xs font-semibold mb-1" style={{ color: 'var(--accent-analytics)' }}>04 · ANALYTICS</div>
           <h2 className="text-lg font-semibold mb-2">วัดผล + ย้อนกลับไปที่ 01</h2>
           <div className="grid grid-cols-2 gap-2 text-center mb-2">
             <div><p className="text-2xl font-bold">{avgScore ?? '—'}</p><p className="text-xs text-gray-500">Avg Creative Score</p></div>
             <div><p className="text-2xl font-bold">{readyToTest}</p><p className="text-xs text-gray-500">Ready to Test</p></div>
           </div>
           {metaConnected ? (
-            <div className="grid grid-cols-2 gap-2 text-center border-t pt-2">
+            <div className="grid grid-cols-2 gap-2 text-center border-t pt-2" style={{ borderColor: 'var(--border)' }}>
               <div><p className="text-lg font-semibold">{fmtBaht(totalSpend)}</p><p className="text-xs text-gray-500">Ad Spend (รอบล่าสุด)</p></div>
               <div><p className="text-lg font-semibold">{avgRoas !== null ? avgRoas.toFixed(2) : '—'}</p><p className="text-xs text-gray-500">ROAS เฉลี่ย</p></div>
             </div>
           ) : (
-            <p className="text-xs text-gray-400 border-t pt-2">ยังไม่มีข้อมูลโฆษณา — ต่อ Meta Ads ที่หน้า Ads Automation ก่อน</p>
+            <p className="text-xs text-gray-400 border-t pt-2" style={{ borderColor: 'var(--border)' }}>ยังไม่มีข้อมูลโฆษณา — ต่อ Meta Ads ที่หน้า Ads Automation ก่อน</p>
           )}
         </a>
       </div>
@@ -236,7 +238,7 @@ export default async function DashboardPage() {
           <ul className="space-y-2">
             {actionQueue.slice(0, 5).map((a, i) => (
               <li key={i} className="text-gray-700 text-sm flex gap-2">
-                <span className="text-accentBlue">•</span> {a}
+                <span className="text-accentTerracotta">•</span> {a}
               </li>
             ))}
           </ul>

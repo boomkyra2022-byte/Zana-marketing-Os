@@ -1,16 +1,47 @@
+/* Kanit (headings) + Sarabun (body) — same pairing the reference dashboard
+   uses (tina-live-session.netlify.app/content_dashboard_demo), read directly
+   off its computed styles. Both are Google Fonts with full Thai coverage,
+   which is a genuine upgrade over the previous unstyled system-font stack
+   for a Thai-first app, independent of matching anyone's specific brand.
+   Must stay the very first rule in this file — @import is only valid
+   before any other CSS statement (including @tailwind). */
+@import url('https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=Sarabun:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
   --navy: #0f172a;
-  --surface: #f4f6f8;
+  /* Warm cream surface + terracotta accent — restyled to match the
+     reference dashboard the user asked to be styled after (explicit
+     "จัดหน้าตาของเว็บฉันให้สวยงามแบบนี้เลย"). Values are original ZANA
+     choices in the same warm family, not copy-pasted hex-for-hex. */
+  --surface: #f7f2ea;
   --panel: #ffffff;
-  --border: #e2e8f0;
+  --border: #e5ddd0;
   --accent-blue: #2563eb;
   --accent-green: #16a34a;
-  --text-main: #0f172a;
-  --text-muted: #64748b;
+  --accent-terracotta: #c8785c;
+  --accent-terracotta-dark: #9a4e32;
+  --accent-terracotta-tint: #f5e6df;
+  --text-main: #241c16;
+  --text-muted: #7a6f62;
+
+  /* Section accent colors — shared by the sidebar nav groups
+     (components/side-nav.tsx) and the Dashboard's 4 quadrant cards
+     (app/(dashboard)/dashboard/page.tsx), so "Strategy" (say) always
+     reads the same color everywhere in the app. Same soft-pastel family
+     as the reference dashboard's panel colors (blush/sage/peach), plus a
+     4th (lavender) since ZANA groups into 4 categories, not 3. */
+  --accent-intelligence: #6b6088; /* muted lavender */
+  --accent-intelligence-tint: #f1eef9;
+  --accent-strategy: #b5892e; /* peach/amber */
+  --accent-strategy-tint: #fbf1e1;
+  --accent-distribution: #c8785c; /* blush/terracotta */
+  --accent-distribution-tint: #fbeae6;
+  --accent-analytics: #2f8f6f; /* sage green */
+  --accent-analytics-tint: #e7f2ec;
 }
 
 html,
@@ -19,17 +50,22 @@ body {
   color: var(--text-main);
   font-size: 16px;
   line-height: 1.6;
+  font-family: 'Sarabun', sans-serif;
+}
+
+h1, h2, h3, h4, .font-heading {
+  font-family: 'Kanit', sans-serif;
 }
 
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  border-radius: 0.875rem;
+  box-shadow: 0 1px 3px rgba(36, 28, 22, 0.05);
 }
 
 .btn-primary {
-  background: var(--accent-blue);
+  background: var(--accent-terracotta);
   color: white;
   border-radius: 0.5rem;
   padding: 0.6rem 1.1rem;
@@ -76,7 +112,7 @@ input[type='radio'] {
   width: 1.1rem;
   height: 1.1rem;
   flex-shrink: 0;
-  accent-color: var(--accent-blue);
+  accent-color: var(--accent-terracotta);
 }
 
 .field-label {
@@ -87,6 +123,9 @@ input[type='radio'] {
   font-weight: 500;
 }
 
+/* Kept for back-compat — components/top-nav.tsx is no longer mounted
+   anywhere (replaced by components/side-nav.tsx below) but the class
+   stays in case anything still references it. */
 .top-nav-link {
   padding: 0.5rem 0.9rem;
   border-radius: 0.5rem;
@@ -101,6 +140,98 @@ input[type='radio'] {
 .top-nav-link:hover {
   color: white;
 }
+
+/* ============================================================
+   Sidebar layout — replaces the old top-nav header shell (explicit
+   user request: "ไม่เอาแท็บเมนูขอบด้านบน ให้ย้ายมาอยู่ในแท็บข้างแทน", then
+   "จัดหน้าตาของเว็บฉันให้สวยงามแบบนี้เลย" pointing at a reference
+   dashboard). Cream background matching the page (not a dark panel),
+   thin low-opacity hairline border instead of a hard grey line, and a
+   soft terracotta tint for the active link — all read directly off the
+   reference's computed styles.
+   Desktop: fixed-width sticky column, full viewport height.
+   Mobile (<768px): off-canvas drawer, toggled by side-nav.tsx's own
+   hamburger button; slides in over the content with a scrim.
+   ============================================================ */
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+.app-main {
+  flex: 1;
+  min-width: 0;
+}
+.sidebar {
+  width: 252px;
+  flex-shrink: 0;
+  background: var(--surface);
+  color: var(--text-main);
+  border-right: 1px solid rgba(36, 28, 22, 0.1);
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem 1rem;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  overflow-y: auto;
+}
+@media (max-width: 767px) {
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 50;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 2px 0 20px rgba(36, 28, 22, 0.18);
+  }
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+}
+
+.sidebar-link {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.625rem;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+}
+.sidebar-link.active {
+  background: var(--accent-terracotta-tint);
+  color: var(--accent-terracotta-dark);
+  font-weight: 600;
+}
+.sidebar-link:hover {
+  color: var(--text-main);
+  background: rgba(36, 28, 22, 0.05);
+}
+.sidebar-group-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 0 0.75rem 0.3rem;
+  margin-top: 0.15rem;
+}
+
+/* Section accents — a colored left border on the group label; the same
+   colors reappear as full card tints on the Dashboard quadrants below. */
+.sidebar-group-intelligence .sidebar-group-label { color: var(--accent-intelligence); border-left: 2px solid var(--accent-intelligence); padding-left: 0.6rem; margin-left: 0.15rem; }
+.sidebar-group-strategy .sidebar-group-label { color: var(--accent-strategy); border-left: 2px solid var(--accent-strategy); padding-left: 0.6rem; margin-left: 0.15rem; }
+.sidebar-group-distribution .sidebar-group-label { color: var(--accent-distribution); border-left: 2px solid var(--accent-distribution); padding-left: 0.6rem; margin-left: 0.15rem; }
+.sidebar-group-analytics .sidebar-group-label { color: var(--accent-analytics); border-left: 2px solid var(--accent-analytics); padding-left: 0.6rem; margin-left: 0.15rem; }
+
+/* Light-surface card variant — Dashboard quadrant cards */
+.section-card {
+  border-left: 3px solid var(--section-color, var(--border));
+  background: var(--section-tint, var(--panel));
+}
+.section-intelligence { --section-color: var(--accent-intelligence); --section-tint: var(--accent-intelligence-tint); }
+.section-strategy { --section-color: var(--accent-strategy); --section-tint: var(--accent-strategy-tint); }
+.section-distribution { --section-color: var(--accent-distribution); --section-tint: var(--accent-distribution-tint); }
+.section-analytics { --section-color: var(--accent-analytics); --section-tint: var(--accent-analytics-tint); }
 
 /* ============================================================
    Ads Automation module — dark zinc-950 + gold theme, scoped to

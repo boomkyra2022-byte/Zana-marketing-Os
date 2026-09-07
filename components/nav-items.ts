@@ -5,6 +5,11 @@ export interface NavItem {
 
 export interface NavGroup {
   label: string;
+  // CSS-safe key matching the `sidebar-group-{slug}` / `section-{slug}`
+  // class names in app/globals.css and the SECTION_ACCENT map in
+  // app/(dashboard)/dashboard/page.tsx — kept separate from `label` so
+  // relabeling a group in the UI never silently breaks its color mapping.
+  slug: 'intelligence' | 'strategy' | 'distribution' | 'analytics';
   items: NavItem[];
 }
 
@@ -28,6 +33,7 @@ export const NAV_SETTINGS: NavItem = { href: '/settings', label: 'Settings' };
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: '01 · Intelligence',
+    slug: 'intelligence',
     items: [
       { href: '/knowledge', label: 'Knowledge Base' },
       { href: '/winners', label: 'Winners / Learnings' }
@@ -35,6 +41,7 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: '02 · Strategy',
+    slug: 'strategy',
     items: [
       { href: '/creative-generator', label: 'Creative Generator' },
       { href: '/flow-prompt', label: 'Flow Prompt Director' },
@@ -44,6 +51,7 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: '03 · Distribution',
+    slug: 'distribution',
     items: [
       { href: '/editor', label: 'Editor' },
       { href: '/voiceover', label: 'พากย์เสียง' }
@@ -51,6 +59,7 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: '04 · Analytics',
+    slug: 'analytics',
     items: [
       { href: '/video-analyzer', label: 'Video Analyzer' },
       { href: '/ads', label: 'Ads Automation' }
