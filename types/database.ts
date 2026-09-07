@@ -105,6 +105,13 @@ export interface Idea {
   parent_winner_id: string | null;
   source_type?: string | null;
   angle?: string | null;
+  // ZANA Framework (see supabase/migrations/0019_zana_framework.sql).
+  // 'STANDARD' (default) | 'ZANA'. funnel_stage above always stays a
+  // canonical stage regardless of framework — this is the separate marker.
+  framework?: string | null;
+  agitate?: string | null;
+  bridge?: string | null;
+  product_reason?: string | null;
   created_at: string;
 }
 
@@ -132,6 +139,15 @@ export interface Script {
   hashtags: string[];
   thumbnail_text: string | null;
   risks: string | null;
+  // ZANA Framework fields (see supabase/migrations/0019_zana_framework.sql).
+  // Populated when framework === 'ZANA'; belief/story/turning_point/offer
+  // above are populated instead when framework === 'STANDARD'. hook, proof,
+  // cta, caption, hashtags are shared by both frameworks.
+  framework?: string | null;
+  problem?: string | null;
+  agitate?: string | null;
+  bridge?: string | null;
+  solution?: string | null;
   created_at: string;
 }
 

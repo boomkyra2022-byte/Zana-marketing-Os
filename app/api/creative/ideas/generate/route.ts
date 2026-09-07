@@ -18,7 +18,9 @@ const requestSchema = z.object({
   platform: z.string().optional(),
   content_style: z.string().optional(),
   promotion: z.string().optional(),
-  brief: z.string().optional()
+  brief: z.string().optional(),
+  // ZANA Framework — separate from `funnel`. See prompts/idea-generator.ts.
+  framework: z.enum(['STANDARD', 'ZANA']).optional()
 });
 
 const ideaSchema = z.object({
@@ -36,7 +38,11 @@ const ideaSchema = z.object({
   potential_score: z.number().min(1).max(10),
   stop_scroll_reason: z.string().nullable(),
   risks: z.string().nullable(),
-  angle: z.string().nullable()
+  angle: z.string().nullable(),
+  framework: z.enum(['STANDARD', 'ZANA']).nullable().optional(),
+  agitate: z.string().nullable().optional(),
+  bridge: z.string().nullable().optional(),
+  product_reason: z.string().nullable().optional()
 });
 
 function generateCreativeId(prefix: string) {
@@ -77,7 +83,8 @@ export async function POST(request: Request) {
       platform: input.platform,
       contentStyle: input.content_style,
       promotion: input.promotion,
-      brief: input.brief
+      brief: input.brief,
+      framework: input.framework
     },
     ctx
   );
@@ -127,7 +134,11 @@ export async function POST(request: Request) {
     status: 'IDEA',
     owner_id: user.id,
     source_type: 'AI',
-    angle: idea.angle
+    angle: idea.angle,
+    framework: idea.framework ?? (input.framework === 'ZANA' ? 'ZANA' : 'STANDARD'),
+    agitate: idea.agitate ?? null,
+    bridge: idea.bridge ?? null,
+    product_reason: idea.product_reason ?? null
   }));
 
   const { data: inserted, error: insertError } = await supabase.from('ideas').insert(rows).select('*');

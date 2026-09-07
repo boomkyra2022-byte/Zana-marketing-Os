@@ -22,6 +22,10 @@ const scriptSchema = z.object({
   proof: z.string().nullable(),
   turning_point: z.string().nullable(),
   offer: z.string().nullable(),
+  problem: z.string().nullable().optional(),
+  agitate: z.string().nullable().optional(),
+  bridge: z.string().nullable().optional(),
+  solution: z.string().nullable().optional(),
   cta: z.string().nullable(),
   full_script: z.string(),
   voice_over: z.string().nullable(),
@@ -98,7 +102,12 @@ export async function POST(request: Request) {
         product: product
           ? { name: product.product_name, brand: product.brand, usp: product.usp, allowed_claims: product.allowed_claims, banned_claims: product.banned_claims }
           : null,
-        persona: persona ? { name: persona.name, age_range: persona.age_range, pains: persona.pains ?? [], desires: persona.desires ?? [] } : null
+        persona: persona ? { name: persona.name, age_range: persona.age_range, pains: persona.pains ?? [], desires: persona.desires ?? [] } : null,
+        // Deterministic from the source idea's own column — never guessed from title.
+        framework: idea.framework === 'ZANA' ? 'ZANA' : 'STANDARD',
+        agitate: idea.agitate ?? null,
+        bridge: idea.bridge ?? null,
+        product_reason: idea.product_reason ?? null
       });
       indexToIdea[idx] = idea;
       idx++;
@@ -152,7 +161,13 @@ export async function POST(request: Request) {
       offer: s.offer,
       caption: s.caption,
       hashtags: s.hashtags,
-      risks: s.risks
+      risks: s.risks,
+      // ZANA Framework — mirrors the source idea's framework, not guessed.
+      framework: idea?.framework === 'ZANA' ? 'ZANA' : 'STANDARD',
+      problem: s.problem ?? null,
+      agitate: s.agitate ?? null,
+      bridge: s.bridge ?? null,
+      solution: s.solution ?? null
     };
   });
 

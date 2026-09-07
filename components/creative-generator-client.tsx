@@ -9,7 +9,8 @@ interface Props {
   personas: { id: string; name: string }[];
 }
 
-const FUNNEL_OPTIONS = ['Awareness', 'Consideration', 'Conversion', 'Retention'];
+const FUNNEL_OPTIONS = ['Awareness', 'Consideration', 'Conversion', 'Retention', 'ZANA Framework'];
+const ZANA_FRAMEWORK_VALUE = 'ZANA Framework';
 const PLATFORM_OPTIONS = ['TikTok', 'Facebook Reels', 'Instagram Reels', 'Marketplace'];
 const IDEA_QTY_PRESETS = [5, 10, 20];
 const SCRIPT_QTY_PRESETS = [1, 3, 5];
@@ -63,6 +64,8 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
   const effectiveIdeaQty = ideaQtyCustom ? parseInt(ideaQtyCustom, 10) || 0 : ideaQty;
   const effectiveScriptQty = scriptQtyCustom ? parseInt(scriptQtyCustom, 10) || 0 : scriptQty;
 
+  const isZanaFramework = funnel === ZANA_FRAMEWORK_VALUE;
+
   async function handleGenerateIdeas() {
     setIdeaError('');
     setLoadingIdeas(true);
@@ -74,7 +77,11 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
           product_id: productId,
           persona_id: personaId || null,
           quantity: effectiveIdeaQty,
-          funnel: funnel || undefined,
+          // ZANA Framework is a copywriting structure, not a funnel stage —
+          // send it via `framework`, not `funnel` (AI still infers the real
+          // funnel stage per idea; see prompts/idea-generator.ts).
+          funnel: isZanaFramework ? undefined : funnel || undefined,
+          framework: isZanaFramework ? 'ZANA' : undefined,
           objective: objective || undefined,
           platform: platform || undefined,
           content_style: contentStyle || undefined,
@@ -251,6 +258,26 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
                   </option>
                 ))}
               </select>
+              {isZanaFramework && (
+                <div
+                  className="mt-2 text-xs rounded-lg p-3 space-y-1.5"
+                  style={{ background: 'var(--accent-strategy-tint)', color: 'var(--text-main)', border: '1px solid var(--accent-strategy)' }}
+                >
+                  <div className="font-semibold" style={{ color: 'var(--accent-strategy)' }}>
+                    ZANA Framework — Hook → Problem → Agitate → Bridge → Solution → Proof → CTA
+                  </div>
+                  <div className="text-gray-600">สูตรสำหรับคอนเทนต์ที่เริ่มจาก Pain/สถานการณ์จริง ก่อนพาสินค้าเข้ามาแก้ปัญหาอย่างเป็นธรรมชาติ</div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-gray-500 pt-1">
+                    <div>Hook — หยุดนิ้ว</div>
+                    <div>Bridge — เชื่อมเข้าหาสินค้า</div>
+                    <div>Problem — ลูกค้าเจออะไร</div>
+                    <div>Solution — สินค้าช่วยอะไร</div>
+                    <div>Agitate — ทำให้เห็นภาพ Pain</div>
+                    <div>Proof — ทำไมควรเชื่อ</div>
+                    <div>CTA — ต้องการให้คนทำอะไรต่อ</div>
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <label className="field-label">Platform</label>
@@ -326,6 +353,14 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
                         <div className="flex items-center gap-2">
                           <span className="font-semibold">{idea.title}</span>
                           <span className="text-xs px-2 py-0.5 rounded-full bg-surface border border-border">{idea.funnel_stage}</span>
+                          {idea.framework === 'ZANA' && (
+                            <span
+                              className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                              style={{ background: 'var(--accent-strategy-tint)', color: 'var(--accent-strategy)' }}
+                            >
+                              ZANA Framework
+                            </span>
+                          )}
                           <span className="text-xs text-accentGreen font-semibold">score {idea.potential_score}/10</span>
                         </div>
                         <div className="text-gray-600 mt-1">Hook: {idea.hook}</div>
@@ -374,22 +409,53 @@ export default function CreativeGeneratorClient({ products, personas }: Props) {
 
           <div className="space-y-3 max-h-[500px] overflow-y-auto">
             {scripts.map((s) => (
-              <div key={s.id} className="card p-4 flex gap-3 items-start">
-                <label className="flex gap-3 items-start cursor-pointer flex-1">
-                  <input type="checkbox" checked={selectedScriptIds.has(s.id)} onChange={() => toggleScript(s.id)} className="mt-1" />
-                  <div className="flex-1 text-sm">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold">{s.title}</span>
-                      <span className="text-xs text-accentGreen font-semibold">score {s.score}/100</span>
-                      <span className="text-xs text-gray-400">~{s.estimated_duration_sec}s</span>
+              <div key={s.id} className="card p-4">
+                <div className="flex gap-3 items-start">
+                  <label className="flex gap-3 items-start cursor-pointer flex-1">
+                    <input type="checkbox" checked={selectedScriptIds.has(s.id)} onChange={() => toggleScript(s.id)} className="mt-1" />
+                    <div className="flex-1 text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">{s.title}</span>
+                        {s.framework === 'ZANA' && (
+                          <span
+                            className="text-xs px-2 py-0.5 rounded-full font-semibold"
+                            style={{ background: 'var(--accent-strategy-tint)', color: 'var(--accent-strategy)' }}
+                          >
+                            ZANA Framework
+                          </span>
+                        )}
+                        <span className="text-xs text-accentGreen font-semibold">score {s.score}/100</span>
+                        <span className="text-xs text-gray-400">~{s.estimated_duration_sec}s</span>
+                      </div>
+                      <div className="text-gray-600 mt-2 whitespace-pre-wrap">{s.full_script}</div>
+                      {s.risks && <div className="text-red-500 text-xs mt-2">⚠ {s.risks}</div>}
                     </div>
-                    <div className="text-gray-600 mt-2 whitespace-pre-wrap">{s.full_script}</div>
-                    {s.risks && <div className="text-red-500 text-xs mt-2">⚠ {s.risks}</div>}
-                  </div>
-                </label>
-                <Link href={`/flow-prompt?source=SCRIPT&source_id=${s.id}`} className="btn-secondary !px-2 !py-1 !text-xs whitespace-nowrap">
-                  🎬 Flow Prompt
-                </Link>
+                  </label>
+                  <Link href={`/flow-prompt?source=SCRIPT&source_id=${s.id}`} className="btn-secondary !px-2 !py-1 !text-xs whitespace-nowrap">
+                    🎬 Flow Prompt
+                  </Link>
+                </div>
+                {s.caption && (
+                  <details className="mt-3 rounded-lg border border-border bg-surface">
+                    <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-gray-600">CAPTION</summary>
+                    <div className="px-3 pb-3 space-y-2">
+                      <div className="text-sm whitespace-pre-wrap">{s.caption}</div>
+                      {s.hashtags && s.hashtags.length > 0 && (
+                        <div className="text-xs text-accentBlue">{s.hashtags.map((h) => `#${h}`).join(' ')}</div>
+                      )}
+                      <button
+                        type="button"
+                        className="btn-secondary !px-2 !py-1 !text-xs"
+                        onClick={() => {
+                          const text = s.hashtags && s.hashtags.length > 0 ? `${s.caption}\n\n${s.hashtags.map((h) => `#${h}`).join(' ')}` : s.caption || '';
+                          navigator.clipboard.writeText(text);
+                        }}
+                      >
+                        📋 Copy Caption
+                      </button>
+                    </div>
+                  </details>
+                )}
               </div>
             ))}
           </div>
