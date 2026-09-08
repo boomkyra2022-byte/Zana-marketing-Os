@@ -4,6 +4,7 @@ import { useState } from 'react';
 import CreativeGeneratorClient from '@/components/creative-generator-client';
 import BannerGeneratorClient from '@/components/banner-generator-client';
 import CaptionGeneratorClient from '@/components/caption-generator-client';
+import VisualHookBannerClient from '@/components/visual-hook-banner-client';
 
 // Explicit user request: "เพิ่มลงในหน้านี้ได้ไหม
 // https://os.zanadynasty.site/creative-generator ทำเป็นอีก 1 หัวข้อ" — the
@@ -19,8 +20,24 @@ import CaptionGeneratorClient from '@/components/caption-generator-client';
 // The route /banner-generator (app/(dashboard)/banner-generator/page.tsx)
 // still works standalone too — this tab renders the exact same client
 // component, not a copy, so there's only one implementation to maintain.
+//
+// Restructured into 5 "Mode" tabs — explicit follow-up spec: "โปรดอัปเกรด
+// Creative Generator... เพิ่ม Mode ด้านบน... อย่าลบ Workflow เดิม". Nothing
+// existing was removed, only relabeled/regrouped under the Mode naming:
+// - "Content & Video" = the original Idea→Script→Storyboard pipeline
+// - "Visual Hook Banner" = the ONE new mode built fully (Creative Brief →
+//   AI Visual Ideas → Prompt Studio → Generation Destination), per the
+//   user's own explicit choice when asked which of the 5 to build first —
+//   the other new-workflow modes weren't attempted yet rather than being
+//   faked, to avoid shipping dead buttons.
+// - "Ads Banner" = the original Banner/Ads Image Generator, unchanged
+// - "E-Commerce Image" / "Reels / Video Prompt" = honestly marked
+//   not-yet-available rather than reusing Ads Banner's UI under a new label
+//   (that would silently promise a workflow — Creative Brief, funnel-aware
+//   ideas, etc. — this tab doesn't actually run)
+// - "คิดแคปชั่น" = unchanged, kept after the 5 Modes per spec
 
-type PageTab = 'pipeline' | 'banner' | 'caption';
+type PageTab = 'pipeline' | 'visual_hook_banner' | 'banner' | 'ecommerce_image' | 'reels_video' | 'caption';
 
 interface ProductRecord {
   id: string;
@@ -74,25 +91,22 @@ export default function CreativeGeneratorPageClient({
   return (
     <div>
       <div className="flex flex-wrap gap-2 mb-6">
-        <button
-          type="button"
-          className={`btn-secondary ${tab === 'pipeline' ? 'ring-2 ring-blue-500' : ''}`}
-          onClick={() => setTab('pipeline')}
-        >
-          Idea → Script → Storyboard
+        <button type="button" className={`btn-secondary ${tab === 'pipeline' ? 'ring-2 ring-blue-500' : ''}`} onClick={() => setTab('pipeline')}>
+          1. Content & Video
         </button>
-        <button
-          type="button"
-          className={`btn-secondary ${tab === 'banner' ? 'ring-2 ring-blue-500' : ''}`}
-          onClick={() => setTab('banner')}
-        >
-          สร้างภาพโฆษณา AI
+        <button type="button" className={`btn-secondary ${tab === 'visual_hook_banner' ? 'ring-2 ring-blue-500' : ''}`} onClick={() => setTab('visual_hook_banner')}>
+          2. Visual Hook Banner
         </button>
-        <button
-          type="button"
-          className={`btn-secondary ${tab === 'caption' ? 'ring-2 ring-blue-500' : ''}`}
-          onClick={() => setTab('caption')}
-        >
+        <button type="button" className={`btn-secondary ${tab === 'banner' ? 'ring-2 ring-blue-500' : ''}`} onClick={() => setTab('banner')}>
+          3. Ads Banner
+        </button>
+        <button type="button" className={`btn-secondary ${tab === 'ecommerce_image' ? 'ring-2 ring-blue-500' : ''}`} onClick={() => setTab('ecommerce_image')}>
+          4. E-Commerce Image
+        </button>
+        <button type="button" className={`btn-secondary ${tab === 'reels_video' ? 'ring-2 ring-blue-500' : ''}`} onClick={() => setTab('reels_video')}>
+          5. Reels / Video Prompt
+        </button>
+        <button type="button" className={`btn-secondary ${tab === 'caption' ? 'ring-2 ring-blue-500' : ''}`} onClick={() => setTab('caption')}>
           คิดแคปชั่น
         </button>
       </div>
@@ -108,8 +122,18 @@ export default function CreativeGeneratorPageClient({
           initialScript={initialScript}
         />
       )}
+      {tab === 'visual_hook_banner' && <VisualHookBannerClient products={products} />}
       {tab === 'banner' && <BannerGeneratorClient history={bannerHistory} products={products} knowledgeItems={knowledgeItems} />}
       {tab === 'caption' && <CaptionGeneratorClient products={products} personas={personas} />}
+      {(tab === 'ecommerce_image' || tab === 'reels_video') && (
+        <div className="card p-8 text-center text-gray-500 space-y-2">
+          <div className="text-lg font-semibold text-gray-600">Mode นี้ยังไม่เปิดใช้งาน</div>
+          <div className="text-sm">
+            {tab === 'ecommerce_image' ? 'E-Commerce Image' : 'Reels / Video Prompt'} อยู่ในแผน Phase ถัดไป — ตอนนี้ระบบสร้าง Workflow ใหม่
+            (Creative Brief → AI Visual Ideas → Prompt Studio → Generate/Export) เต็มรูปแบบให้เฉพาะ <b>Visual Hook Banner</b> ก่อน ตามที่เลือกไว้
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -255,6 +255,91 @@ export interface Winner {
 }
 
 // ============================================================
+// Visual Hook Banner mode — Phase 1 of Creative Brief -> AI Visual Ideas ->
+// Prompt Studio -> Generation Destination (see
+// supabase/migrations/0020_visual_hook_banner.sql)
+// ============================================================
+
+export type VisualIdeaStrength = 'Safe' | 'Strong' | 'Unexpected';
+
+export interface VisualIdeaBrief {
+  modelIdentity?: string | null;
+  funnelStage?: string | null;
+  platform?: string | null;
+  objective?: string | null;
+  targetAudience?: string | null;
+  painPoint?: string | null;
+  benefit?: string | null;
+  proof?: string | null;
+  promotion?: string | null;
+  contentStyle?: string | null;
+  visualHookSeed?: string | null;
+  hookStrength?: VisualIdeaStrength | null;
+  outputRatio?: string | null;
+}
+
+export interface VisualIdea {
+  id: string;
+  mode: string;
+  product_id: string | null;
+  brief: VisualIdeaBrief;
+  title: string;
+  funnel_stage: string | null;
+  creative_angle: string | null;
+  visual_hook: string | null;
+  scene: string | null;
+  situation: string | null;
+  pain_point: string | null;
+  emotion: string | null;
+  solution: string | null;
+  benefit: string | null;
+  proof: string | null;
+  text_hook: string | null;
+  supporting_text: string | null;
+  offer: string | null;
+  cta: string | null;
+  layout: string | null;
+  expected_strength: VisualIdeaStrength | null;
+  status: string;
+  owner_id: string | null;
+  created_at: string;
+}
+
+export interface PromptStudioBlockState {
+  enabled: boolean;
+  text: string;
+}
+
+export interface PromptStudioPreset {
+  id: string;
+  name: string;
+  mode: string;
+  blocks: Record<string, PromptStudioBlockState>;
+  created_by: string | null;
+  created_at: string;
+}
+
+export type GenerationLogStatus = 'success' | 'partial' | 'failed';
+
+export interface GenerationLog {
+  id: string;
+  user_id: string | null;
+  project_id: string | null;
+  mode: string;
+  provider: string;
+  model: string;
+  prompt_version: string | null;
+  prompt_text: string | null;
+  image_count: number;
+  estimated_cost: number | null;
+  actual_cost: number | null;
+  status: GenerationLogStatus;
+  error: string | null;
+  result_paths: string[];
+  created_at: string;
+}
+
+// ============================================================
 // Ads Automation Bot — Phase 1 (see supabase/migrations/0014_ads_automation_phase1.sql)
 // ============================================================
 
