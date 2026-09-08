@@ -3,9 +3,24 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@/lib/supabase/server';
 import { editImages, type ImageSize } from '@/lib/ai/image-gen';
-import { buildAnalysisMessages, buildConceptImagePrompt, type ProductInfo } from '@/prompts/banner-generator';
-import { uploadEditedClip, resignEditedClip } from '@/lib/supabase/storage';
+import { buildAnalysisMessages, buildConceptImagePrompt, findAdVisualStrategy, type ProductInfo } from '@/prompts/banner-generator';
+import { uploadEditedClip, resignEditedClip, signLibraryPaths, downloadLibraryImages } from '@/lib/supabase/storage';
 import { AIProviderError, callOpenAIVisionJSON } from '@/lib/ai/openai';
+
+// Real bug found via live user testing: reference photos used to be sent as
+// base64 data URLs inline in this route's JSON body. With MAX_REF_IMAGES=3
+// at up to 3MB each (client-side cap), base64 inflates that ~33%, so a
+// couple of real product photos could push the raw request body past
+// Vercel's hard 4.5MB-per-function limit (infra-level, not configurable).
+// When that happens Vercel rejects the request BEFORE it reaches this
+// handler at all, returning a plain-text platform error ("Request Entity
+// Too Large") instead of JSON — which is why the client saw `Unexpected
+// token 'R', "Request En"... is not valid JSON` instead of any error this
+// route's own code could produce. Fixed by switching reference_images /
+// style_reference to Storage PATHS (uploaded directly browser->Storage via
+// the `library-uploads` bucket, same pattern as the Editor tool and the
+// Model/Product Library) — the actual image bytes never touch this
+// function's request body at all now, only short path strings do.
 
 // Banner/Ads Image Generator — v2, full two-phase rebuild per the user's own
 // "E-Commerce Visual Director" system prompt (pasted in chat) and their
@@ -55,9 +70,15 @@ const productInfoShape = {
   marketplace: z.string().max(100).optional(),
   aspect_ratio: z.string().max(20).optional(),
   prohibitions: z.string().max(2000, 'ข้อห้ามยาวเกินไป (สูงสุด 2000 ตัวอักษร) — ลองตัดข้อความที่ไม่จำเป็นออก').optional(),
-  // Product photos as data URLs — same base64-in-JSON pattern used
-  // throughout this app (Video Analyzer frames, v1 banner reference_images).
-  reference_images: z.array(z.string().min(1)).max(3).default([])
+  // Product photos as `library-uploads` Storage paths (browser uploaded them
+  // directly, see components/banner-generator-client.tsx) — NOT base64 data
+  // URLs anymore, see the comment above on why that broke for real users.
+  reference_images: z.array(z.string().min(1)).max(3).default([]),
+  // A key into AD_VISUAL_STRATEGIES, never raw text — resolved server-side
+  // via findAdVisualStrategy() so the actual instruction sent to the AI is
+  // always this app's own fixed wording (explicit user request: "เพิ่ม
+  // ตัวเลือกกลยุทธ์การทำภาพ ADS").
+  ad_strategy_key: z.string().max(50).optional()
 };
 
 const analyzeSchema = z.object({
@@ -79,22 +100,25 @@ const generateSchema = z.object({
   concepts: z.array(conceptSchema).min(1).max(9),
   versions_per_concept: z.number().int().min(1).max(3).default(1),
   size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
+  // Storage path, not a data URL — same fix as reference_images above.
   style_reference: z.string().optional()
 });
 
 const requestSchema = z.discriminatedUnion('mode', [analyzeSchema, generateSchema]);
 
-const MAX_TOTAL_REQUEST_BYTES = 4 * 1024 * 1024; // stay under Vercel's 4.5MB body cap with headroom
-
-function decodeDataUrl(dataUrl: string): { buffer: Buffer; contentType: string } {
-  const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
-  if (!match) {
-    throw new AIProviderError('รูปแบบไฟล์ภาพอ้างอิงไม่ถูกต้อง', 400);
-  }
-  return { buffer: Buffer.from(match[2], 'base64'), contentType: match[1] };
-}
-
-function toProductInfo(input: { product_name: string; category?: string; selling_points?: string; on_pack_text?: string; age_size_qty?: string; registration_info?: string; price_or_promo?: string; marketplace?: string; aspect_ratio?: string; prohibitions?: string }): ProductInfo {
+function toProductInfo(input: {
+  product_name: string;
+  category?: string;
+  selling_points?: string;
+  on_pack_text?: string;
+  age_size_qty?: string;
+  registration_info?: string;
+  price_or_promo?: string;
+  marketplace?: string;
+  aspect_ratio?: string;
+  prohibitions?: string;
+  ad_strategy_key?: string;
+}): ProductInfo {
   return {
     productName: input.product_name,
     category: input.category,
@@ -105,7 +129,8 @@ function toProductInfo(input: { product_name: string; category?: string; selling
     priceOrPromo: input.price_or_promo,
     marketplace: input.marketplace,
     aspectRatio: input.aspect_ratio,
-    prohibitions: input.prohibitions
+    prohibitions: input.prohibitions,
+    adStrategy: findAdVisualStrategy(input.ad_strategy_key)
   };
 }
 
@@ -179,9 +204,14 @@ export async function POST(request: Request) {
   }
   const input = parsed.data;
 
-  const refBytesEstimate = input.reference_images.reduce((sum, s) => sum + s.length * 0.75, 0);
-  if (refBytesEstimate > MAX_TOTAL_REQUEST_BYTES) {
-    return NextResponse.json({ error: 'ไฟล์ภาพอ้างอิงรวมกันใหญ่เกินไป — ลองใช้ภาพที่มีขนาดเล็กลง' }, { status: 413 });
+  // Ownership check — same defensive pattern as signSourceUpload() in
+  // lib/supabase/storage.ts: a path must live under the caller's own uid
+  // folder in the library-uploads bucket, so one user can't reference
+  // another user's uploaded photo by guessing/sharing a path string.
+  const allPaths = [...input.reference_images, ...(input.mode === 'generate' && input.style_reference ? [input.style_reference] : [])];
+  const invalidPath = allPaths.find((p) => !p.startsWith(`${user.id}/`));
+  if (invalidPath) {
+    return NextResponse.json({ error: 'ไม่มีสิทธิ์เข้าถึงไฟล์ภาพนี้' }, { status: 403 });
   }
 
   // ── Mode 1: analyze — text+vision call, no images generated, nothing saved ──
@@ -192,6 +222,14 @@ export async function POST(request: Request) {
     try {
       const productInfo = toProductInfo(input);
       const { system, user: userMsg } = buildAnalysisMessages(productInfo, input.concept_count);
+      // Reference photos are signed Storage URLs now, not base64 — OpenAI's
+      // vision API accepts a plain HTTPS image_url just as well as a data
+      // URL, so there's no need to download+re-encode server-side here.
+      const signed = await signLibraryPaths(input.reference_images);
+      const images = input.reference_images.map((p) => signed[p]).filter((url): url is string => !!url);
+      if (images.length === 0) {
+        return NextResponse.json({ error: 'ไม่พบไฟล์ภาพที่อัปโหลด ลองแนบภาพใหม่อีกครั้ง' }, { status: 400 });
+      }
       // No explicit model override — same convention as the Video Analyzer's
       // own callOpenAIVisionJSON usage (app/api/creative/videos/import/route.ts):
       // falls back to AI_MODEL env var, then gpt-4o-mini (vision-capable),
@@ -199,7 +237,7 @@ export async function POST(request: Request) {
       const { text } = await callOpenAIVisionJSON({
         system,
         user: userMsg,
-        images: input.reference_images,
+        images,
         temperature: 0.6,
         timeoutMs: 90000
       });
@@ -229,21 +267,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'กรุณาแนบภาพสินค้าจริงอย่างน้อย 1 ภาพก่อนสร้าง — ระบบต้องใช้เป็น Source of Truth' }, { status: 400 });
   }
 
-  const styleBytesEstimate = input.style_reference ? input.style_reference.length * 0.75 : 0;
-  if (refBytesEstimate + styleBytesEstimate > MAX_TOTAL_REQUEST_BYTES) {
-    return NextResponse.json({ error: 'ไฟล์ภาพอ้างอิงรวมกันใหญ่เกินไป — ลองใช้ภาพที่มีขนาดเล็กลง' }, { status: 413 });
-  }
-
   try {
     const productInfo = toProductInfo(input);
 
-    const productRefImages = input.reference_images.map((dataUrl, i) => {
-      const { buffer, contentType } = decodeDataUrl(dataUrl);
-      return { buffer, contentType, filename: `ref_${i}.png` };
-    });
-    const styleRefImage = input.style_reference ? decodeDataUrl(input.style_reference) : null;
-    const allReferenceImages = styleRefImage
-      ? [...productRefImages, { buffer: styleRefImage.buffer, contentType: styleRefImage.contentType, filename: 'style_ref.png' }]
+    // Downloads happen server-side from Storage (service-role) — the actual
+    // image bytes never travel through this route's own request body.
+    const productRefImages = await downloadLibraryImages(input.reference_images);
+    if (productRefImages.length === 0) {
+      return NextResponse.json({ error: 'ไม่พบไฟล์ภาพสินค้าที่อัปโหลด ลองแนบภาพใหม่อีกครั้ง' }, { status: 400 });
+    }
+    const styleRefImages = input.style_reference ? await downloadLibraryImages([input.style_reference]) : [];
+    const allReferenceImages = styleRefImages[0]
+      ? [...productRefImages, { ...styleRefImages[0], filename: 'style_ref.png' }]
       : productRefImages;
 
     // Each concept is its own creative direction → its own prompt → its own

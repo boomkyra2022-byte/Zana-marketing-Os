@@ -178,6 +178,8 @@ Awareness → Consideration → Conversion → Trust
 - อัญชัน = ม่วงลาเวนเดอร์ / floral / gentle / soft clean
 - สินค้าแม่และเด็ก = โทนอ่อนโยน น่ารัก สะอาด เชื่อถือได้
 
+ถ้าข้อมูลสินค้าระบุ "กลยุทธ์การทำภาพ Ads ที่ต้องการ" มาด้วย: ให้ใช้กลยุทธ์นั้นเป็นตัวกำหนด mood/angle/การจัดองค์ประกอบหลักของทุก Concept (ไม่ใช่แค่เลือกสี) โดยยังต้องคุมอยู่ใน [CORE RULES: SOURCE OF TRUTH] และ [COMPLIANCE / CLAIM CONTROL] เดิมทุกข้อ — กลยุทธ์เป็นเรื่องของอารมณ์/มุมมองภาพ ไม่ใช่ข้ออนุญาตให้แต่ง claim หรือข้อมูลสินค้าเกินจริง
+
 ────────────────────
 [OUTPUT FORMAT]
 เมื่อวิเคราะห์:
@@ -210,6 +212,98 @@ Awareness → Consideration → Conversion → Trust
 [TASK]
 ใช้ข้อมูลและภาพที่ฉันแนบมา เพื่อวิเคราะห์หรือสร้างภาพตามกติกาทั้งหมดด้านบน โดยยึด Source of Truth อย่างเคร่งครัด และทำให้งานออกมาระดับ commercial-ready พร้อมใช้งานจริง`;
 
+// Ad Visual Strategy — explicit user request: "เพิ่มตัวเลือกกลยุทธ์การทำภาพ
+// ADS เป็นตัวเลือกสไตล์ภาพ" with 12 named psychological/creative approaches
+// pasted verbatim. Stored as a lookup by `key` (not raw text) so the actual
+// instruction sent to the AI is always this app's own fixed wording — the
+// client only ever sends back the key it picked, never free text, so this
+// can't drift or be spoofed into something off-brand.
+export interface AdVisualStrategy {
+  key: string;
+  name: string;
+  tagline: string; // the user's own Thai one-liner per strategy
+  guidance: string; // fuller instruction actually fed to the AI
+}
+
+export const AD_VISUAL_STRATEGIES: AdVisualStrategy[] = [
+  {
+    key: 'social_anxiety',
+    name: 'Social Anxiety Marketing',
+    tagline: 'กลัวสายตาคนอื่น',
+    guidance: 'สื่อสารความกังวลเรื่องสายตา/การถูกตัดสินจากคนรอบข้าง แล้ววางสินค้าเป็นทางออกที่ทำให้มั่นใจต่อหน้าคนอื่นได้'
+  },
+  {
+    key: 'visual_metaphor',
+    name: 'Visual Metaphor',
+    tagline: 'เปลี่ยน Pain ให้เป็นภาพ',
+    guidance: 'ใช้ภาพเปรียบเทียบ/สัญลักษณ์แทนความเจ็บปวดหรือปัญหาของลูกค้า แทนการอธิบายตรงๆ ด้วยข้อความ'
+  },
+  {
+    key: 'billboard_fantasy',
+    name: 'Billboard Fantasy',
+    tagline: 'ทำให้แบรนด์ดูใหญ่',
+    guidance: 'จัดแสง/องค์ประกอบ/สัดส่วนให้ดูเหมือนป้ายโฆษณาพรีเมียมของแบรนด์ใหญ่ สร้างความน่าเชื่อถือและภาพลักษณ์ที่ดูมีระดับ'
+  },
+  {
+    key: 'relatable_daily_pain',
+    name: 'Relatable Daily Pain',
+    tagline: 'จริงจนคนบอก เหมือนชีวิตกู',
+    guidance: 'ใช้ฉาก/สถานการณ์ในชีวิตประจำวันที่สมจริงมาก จนกลุ่มเป้าหมายรู้สึกว่านี่คือชีวิตตัวเองเป๊ะๆ'
+  },
+  {
+    key: 'body_confidence',
+    name: 'Body Confidence Marketing',
+    tagline: 'ขายความมั่นใจ ไม่ใช่สินค้า',
+    guidance: 'โฟกัสที่ความรู้สึกมั่นใจ/ผลลัพธ์ทางอารมณ์ที่เปลี่ยนไปหลังใช้สินค้า มากกว่าโชว์ตัวสินค้าเป็นหลัก'
+  },
+  {
+    key: 'emotional_compression',
+    name: 'Emotional Compression',
+    tagline: 'ภาพเดียวแต่เจ็บ',
+    guidance: 'อัดอารมณ์ทั้งหมดไว้ในภาพเดียว ไม่อธิบายเยิ่นเย้อ ให้ภาพแรกที่เห็นกระแทกใจคนดูทันที'
+  },
+  {
+    key: 'performance_typography',
+    name: 'Performance Typography',
+    tagline: 'ตัวหนังสือคือ Thumbnail',
+    guidance: 'ให้ข้อความ/Typography เป็นจุดโฟกัสหลักของภาพ ต้องอ่านออกและเข้าใจได้แม้ย่อเป็น thumbnail เล็กๆ บนฟีด'
+  },
+  {
+    key: 'native_feed_camouflage',
+    name: 'Native Feed Camouflage',
+    tagline: 'แอดต้องกลืนไปกับ Feed',
+    guidance: 'ออกแบบให้ดูเหมือนโพสต์ธรรมชาติในฟีด ไม่มีลักษณะของโฆษณาขายของแบบตรงไปตรงมา'
+  },
+  {
+    key: 'emotional_identity',
+    name: 'Emotional Identity Marketing',
+    tagline: 'ขายตัวตนที่คนอยากเป็น',
+    guidance: 'นำเสนอตัวตน/ไลฟ์สไตล์ที่กลุ่มเป้าหมายอยากเป็น โดยให้สินค้าเป็นส่วนหนึ่งของตัวตนนั้น ไม่ใช่พระเอกเดี่ยว'
+  },
+  {
+    key: 'fake_native_ads',
+    name: 'Fake Native Ads',
+    tagline: 'ทำให้เหมือนไม่ใช่แอด',
+    guidance: 'จำลองสไตล์โพสต์ทั่วไปหรือรีวิวจริงจากผู้ใช้ ไม่มีองค์ประกอบกราฟิกโฆษณาที่ดูจงใจขายของ'
+  },
+  {
+    key: 'fear_visualization',
+    name: 'Fear Visualization',
+    tagline: 'จำลองสิ่งที่คนกลัว',
+    guidance: 'แสดงภาพสิ่งที่ลูกค้ากลัวจะเกิดขึ้นถ้าไม่แก้ปัญหา (เชิงภาพ ไม่ใช่ข้อความ) ก่อนเชื่อมโยงไปสู่สินค้าเป็นทางออก'
+  },
+  {
+    key: 'psychological_framing',
+    name: 'Psychological Product Framing',
+    tagline: 'ไม่ได้ขายสินค้า แต่ขายชีวิตหลังใช้',
+    guidance: 'เฟรมภาพให้เห็นผลลัพธ์/ชีวิตหลังใช้สินค้าเป็นหลัก มากกว่าโชว์ตัวสินค้าตรงๆ'
+  }
+];
+
+export function findAdVisualStrategy(key?: string | null): AdVisualStrategy | undefined {
+  return key ? AD_VISUAL_STRATEGIES.find((s) => s.key === key) : undefined;
+}
+
 export interface ProductInfo {
   productName: string;
   category?: string;
@@ -221,6 +315,7 @@ export interface ProductInfo {
   marketplace?: string;
   aspectRatio?: string;
   prohibitions?: string;
+  adStrategy?: AdVisualStrategy;
 }
 
 export interface ConceptInput {
@@ -241,7 +336,8 @@ function formatProductInfoBlock(input: ProductInfo): string {
 - ราคา/โปรโมชั่น/CTA: ${input.priceOrPromo || 'ไม่ระบุ — ห้ามใส่ราคาขึ้นเอง'}
 - Marketplace/ช่องทางใช้งาน: ${input.marketplace || 'ไม่ระบุ'}
 - อัตราส่วนภาพที่ต้องการ: ${input.aspectRatio || '1:1'}
-- ข้อห้ามเฉพาะงานนี้: ${input.prohibitions || 'ไม่มี'}`;
+- ข้อห้ามเฉพาะงานนี้: ${input.prohibitions || 'ไม่มี'}
+- กลยุทธ์การทำภาพ Ads ที่ต้องการ: ${input.adStrategy ? `${input.adStrategy.name} ("${input.adStrategy.tagline}") — ${input.adStrategy.guidance}` : 'ไม่ระบุ — เลือก visual direction ที่เหมาะกับสินค้าเองตาม [VISUAL STYLE DIRECTION]'}`;
 }
 
 // Phase 1: analysis + concept proposal (text model, JSON response).

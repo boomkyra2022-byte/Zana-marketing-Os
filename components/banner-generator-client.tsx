@@ -1,7 +1,9 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { createProductQuick } from '@/app/(dashboard)/products/actions';
+import { LibraryImagePicker } from '@/components/library-image-picker';
+import { AD_VISUAL_STRATEGIES, buildConceptImagePrompt, findAdVisualStrategy, type ConceptInput, type ProductInfo } from '@/prompts/banner-generator';
 
 // Banner/Ads Image Generator — v2, full two-phase rebuild. Explicit user
 // request: pasted their own "E-Commerce Visual Director" system prompt and
@@ -15,7 +17,6 @@ import { createProductQuick } from '@/app/(dashboard)/products/actions';
 //      a style variation of one template — that was v1's model).
 
 const MAX_REF_IMAGES = 3;
-const MAX_FILE_BYTES = 3 * 1024 * 1024; // per-file cap, keeps total request well under Vercel's 4.5MB body limit
 
 // Must match the server's zod limits in app/api/tools/banner-generator/generate/route.ts
 // (productInfoShape) — kept as constants here so the textarea maxLength/
@@ -37,15 +38,6 @@ const STANDARD_CONCEPTS: { id: number; name: string; funnel_stage: string; descr
   { id: 8, name: 'Marketplace Clean Card / Product Info Summary', funnel_stage: 'Conversion', description: 'การ์ดสรุปข้อมูลสินค้าแบบสะอาด ใช้เป็นภาพตะกร้าใน Marketplace' },
   { id: 9, name: 'Registration / Proof / Verified Info', funnel_stage: 'Trust', description: 'สื่อสารเลขจดแจ้ง/ข้อมูลอ้างอิงที่ตรวจสอบได้ (ใช้เฉพาะข้อมูลที่ยืนยันแล้วเท่านั้น)' }
 ];
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
 
 interface HistoryItem {
   id: string;
@@ -130,6 +122,11 @@ export default function BannerGeneratorClient({ history: initialHistory, product
   const [aspectRatio, setAspectRatio] = useState<'1024x1024' | '1024x1536' | '1536x1024'>('1024x1024');
   const [prohibitions, setProhibitions] = useState('');
   const [conceptCount, setConceptCount] = useState(9);
+  // Ad Visual Strategy — explicit user request: "เพิ่มตัวเลือกกลยุทธ์การทำภาพ
+  // ADS เป็นตัวเลือกสไตล์ภาพ". Stores only the key; the actual instruction
+  // text lives server-side (prompts/banner-generator.ts) so it can never be
+  // tampered with via the request body.
+  const [adStrategyKey, setAdStrategyKey] = useState('');
 
   // Product/Knowledge Base picker — explicit user request: "อยากให้เพิ่มการนำ
   // Knowledge base หรือ Product สินค้าแสดงเป็นตัวเลือกเพื่อจะได้ไม่ต้องกรอกใหม่
@@ -139,10 +136,14 @@ export default function BannerGeneratorClient({ history: initialHistory, product
   const [savingProduct, setSavingProduct] = useState(false);
   const [productSaveMsg, setProductSaveMsg] = useState('');
 
-  const [refImages, setRefImages] = useState<{ name: string; dataUrl: string }[]>([]);
-  const [styleRef, setStyleRef] = useState<{ name: string; dataUrl: string } | null>(null);
-  const refInputRef = useRef<HTMLInputElement | null>(null);
-  const styleInputRef = useRef<HTMLInputElement | null>(null);
+  // Storage paths now, not base64 data URLs — real bug fix (see route.ts):
+  // inlining reference photo bytes into this route's JSON body could exceed
+  // Vercel's hard 4.5MB request limit, which fails BEFORE the app's own code
+  // even runs, surfacing as an unparseable "Request En[tity Too Large]..."
+  // response instead of any error this app controls. LibraryImagePicker
+  // uploads straight to Storage and hands back paths instead.
+  const [refImagePaths, setRefImagePaths] = useState<string[]>([]);
+  const [styleRefPaths, setStyleRefPaths] = useState<string[]>([]);
 
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
@@ -252,47 +253,6 @@ export default function BannerGeneratorClient({ history: initialHistory, product
     }
   }
 
-  async function handleRefFiles(files: FileList | null) {
-    if (!files) return;
-    setError('');
-    const next = [...refImages];
-    for (const file of Array.from(files)) {
-      if (next.length >= MAX_REF_IMAGES) break;
-      if (file.size > MAX_FILE_BYTES) {
-        setError(`ไฟล์ ${file.name} ใหญ่เกินไป (สูงสุด ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB ต่อภาพ)`);
-        continue;
-      }
-      try {
-        const dataUrl = await fileToDataUrl(file);
-        next.push({ name: file.name, dataUrl });
-      } catch {
-        setError(`อ่านไฟล์ ${file.name} ไม่สำเร็จ`);
-      }
-    }
-    setRefImages(next.slice(0, MAX_REF_IMAGES));
-    if (refInputRef.current) refInputRef.current.value = '';
-  }
-
-  function removeRefImage(idx: number) {
-    setRefImages((prev) => prev.filter((_, i) => i !== idx));
-  }
-
-  async function handleStyleRefFile(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const file = files[0];
-    if (file.size > MAX_FILE_BYTES) {
-      setError(`ไฟล์ใหญ่เกินไป (สูงสุด ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB)`);
-      return;
-    }
-    try {
-      const dataUrl = await fileToDataUrl(file);
-      setStyleRef({ name: file.name, dataUrl });
-    } catch {
-      setError('อ่านไฟล์ตัวอย่างสไตล์ไม่สำเร็จ');
-    }
-    if (styleInputRef.current) styleInputRef.current.value = '';
-  }
-
   function productInfoPayload() {
     return {
       product_name: productName.trim(),
@@ -305,8 +265,61 @@ export default function BannerGeneratorClient({ history: initialHistory, product
       marketplace: marketplace.trim() || undefined,
       aspect_ratio: aspectRatio,
       prohibitions: prohibitions.trim() || undefined,
-      reference_images: refImages.map((r) => r.dataUrl)
+      reference_images: refImagePaths,
+      ad_strategy_key: adStrategyKey || undefined
     };
+  }
+
+  // Mirrors toProductInfo() in app/api/tools/banner-generator/generate/route.ts
+  // but built client-side — buildConceptImagePrompt() is a pure string
+  // function with no server-only dependency, so it's safe to call directly
+  // here and get byte-for-byte the same prompt the server would send to
+  // OpenAI. Lets the user preview/copy a concept's exact prompt WITHOUT
+  // spending an API call — explicit user request: "อยากให้มีด้วยเพื่อป้องกัน
+  // การสร้างภาพไม่สำเร็จและไม่สวยงาม" (want this so they can sanity-check or
+  // finish in ChatGPT themselves instead of risking a failed/ugly generation).
+  function toProductInfoForPrompt(): ProductInfo {
+    return {
+      productName: productName.trim(),
+      category: category.trim() || undefined,
+      sellingPoints: sellingPoints.trim() || undefined,
+      onPackText: onPackText.trim() || undefined,
+      ageSizeQty: ageSizeQty.trim() || undefined,
+      registrationInfo: registrationInfo.trim() || undefined,
+      priceOrPromo: priceOrPromo.trim() || undefined,
+      marketplace: marketplace.trim() || undefined,
+      aspectRatio: aspectRatio,
+      prohibitions: prohibitions.trim() || undefined,
+      adStrategy: findAdVisualStrategy(adStrategyKey)
+    };
+  }
+
+  const [promptCopyMsg, setPromptCopyMsg] = useState('');
+
+  // AnalysisConcept (this file, snake_case funnel_stage) -> ConceptInput
+  // (prompts/banner-generator.ts, camelCase funnelStage) — same field rename
+  // generateFromConcepts() already does when building the API payload.
+  function toConceptInput(c: AnalysisConcept): ConceptInput {
+    return { id: c.id, name: c.name, funnelStage: c.funnel_stage, description: c.description };
+  }
+
+  function copyPromptForConcept(concept: AnalysisConcept) {
+    const prompt = buildConceptImagePrompt(toProductInfoForPrompt(), toConceptInput(concept));
+    navigator.clipboard.writeText(prompt);
+    setPromptCopyMsg(`✓ คัดลอก Prompt "${concept.name}" แล้ว — ไปวางใน ChatGPT ได้เลย (อย่าลืมแนบรูปสินค้าเดียวกันไปด้วย)`);
+    setTimeout(() => setPromptCopyMsg(''), 4000);
+  }
+
+  function copyPromptsForSelected() {
+    const chosen = analysis?.concepts.filter((c) => selectedConceptIds.has(c.id)) || [];
+    if (chosen.length === 0) return;
+    const info = toProductInfoForPrompt();
+    const text = chosen
+      .map((c, i) => `${'='.repeat(20)} Concept ${i + 1}/${chosen.length}: ${c.name} ${'='.repeat(20)}\n\n${buildConceptImagePrompt(info, toConceptInput(c))}`)
+      .join('\n\n\n');
+    navigator.clipboard.writeText(text);
+    setPromptCopyMsg(`✓ คัดลอก Prompt ทั้งหมด ${chosen.length} Concept แล้ว — อย่าลืมแนบรูปสินค้าเดียวกันไปด้วยตอนวางใน ChatGPT`);
+    setTimeout(() => setPromptCopyMsg(''), 4000);
   }
 
   async function analyze() {
@@ -314,7 +327,7 @@ export default function BannerGeneratorClient({ history: initialHistory, product
       setError('กรุณาใส่ชื่อสินค้า');
       return;
     }
-    if (refImages.length === 0) {
+    if (refImagePaths.length === 0) {
       setError('กรุณาแนบภาพสินค้าจริงอย่างน้อย 1 ภาพก่อนวิเคราะห์');
       return;
     }
@@ -353,7 +366,7 @@ export default function BannerGeneratorClient({ history: initialHistory, product
       setError('กรุณาใส่ชื่อสินค้า');
       return;
     }
-    if (refImages.length === 0) {
+    if (refImagePaths.length === 0) {
       setError('กรุณาแนบภาพสินค้าจริงอย่างน้อย 1 ภาพก่อนสร้าง');
       return;
     }
@@ -374,7 +387,7 @@ export default function BannerGeneratorClient({ history: initialHistory, product
           concepts: concepts.map((c) => ({ id: c.id, name: c.name, funnel_stage: c.funnel_stage, description: c.description })),
           versions_per_concept: versionsPerConcept,
           size: aspectRatio,
-          style_reference: styleRef?.dataUrl
+          style_reference: styleRefPaths[0]
         })
       });
       const json = await res.json();
@@ -543,32 +556,43 @@ export default function BannerGeneratorClient({ history: initialHistory, product
         </div>
 
         <div>
-          <label className="field-label">ภาพสินค้าจริง * (ใช้เป็น Source of Truth — ไม่ออกแบบสินค้าใหม่)</label>
-          <input ref={refInputRef} type="file" accept="image/*" multiple onChange={(e) => handleRefFiles(e.target.files)} />
-          {refImages.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {refImages.map((r, i) => (
-                <div key={i} className="flex items-center gap-2 card px-2 py-1">
-                  <span className="text-xs truncate max-w-[140px]">{r.name}</span>
-                  <button type="button" className="text-xs text-red-600" onClick={() => removeRefImage(i)}>✕</button>
-                </div>
-              ))}
-            </div>
+          <label className="field-label">กลยุทธ์การทำภาพ ADS (ไม่บังคับ — เลือกมุมมองทางจิตวิทยา/สไตล์ภาพ)</label>
+          <select value={adStrategyKey} onChange={(e) => setAdStrategyKey(e.target.value)}>
+            <option value="">— ไม่ระบุ (ให้ AI เลือกให้เหมาะกับสินค้าเอง) —</option>
+            {AD_VISUAL_STRATEGIES.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.name} — {s.tagline}
+              </option>
+            ))}
+          </select>
+          {adStrategyKey && (
+            <p className="text-xs text-gray-500 mt-1">{AD_VISUAL_STRATEGIES.find((s) => s.key === adStrategyKey)?.guidance}</p>
           )}
-          {refImages.length === 0 && (
+        </div>
+
+        <div>
+          <LibraryImagePicker
+            name="ref_images"
+            label="ภาพสินค้าจริง * (ใช้เป็น Source of Truth — ไม่ออกแบบสินค้าใหม่)"
+            folder="banner-refs"
+            maxFiles={MAX_REF_IMAGES}
+            onChange={setRefImagePaths}
+            help={`อัปโหลดตรงไปที่ Storage ไม่ผ่าน API เลย — ไม่ติด limit ขนาดไฟล์ 4.5MB แบบเมื่อก่อน สูงสุด ${MAX_REF_IMAGES} ไฟล์`}
+          />
+          {refImagePaths.length === 0 && (
             <p className="text-xs text-amber-600 mt-1">⚠ ต้องแนบภาพสินค้าจริงก่อนวิเคราะห์หรือสร้างภาพ — ระบบใช้ภาพนี้เป็นต้นแบบ ไม่วาดสินค้าขึ้นจากจินตนาการ</p>
           )}
         </div>
 
         <div>
-          <label className="field-label">ภาพตัวอย่างสไตล์ที่ต้องการ (ไม่บังคับ)</label>
-          <input ref={styleInputRef} type="file" accept="image/*" onChange={(e) => handleStyleRefFile(e.target.files)} />
-          {styleRef && (
-            <div className="flex items-center gap-2 card px-2 py-1 mt-2 w-fit">
-              <span className="text-xs truncate max-w-[180px]">{styleRef.name}</span>
-              <button type="button" className="text-xs text-red-600" onClick={() => setStyleRef(null)}>✕</button>
-            </div>
-          )}
+          <LibraryImagePicker
+            name="style_reference"
+            label="ภาพตัวอย่างสไตล์ที่ต้องการ (ไม่บังคับ)"
+            folder="banner-style"
+            maxFiles={1}
+            multiple={false}
+            onChange={setStyleRefPaths}
+          />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -644,6 +668,17 @@ export default function BannerGeneratorClient({ history: initialHistory, product
                         </p>
                         {c.funnel_stage && <p className="text-xs text-gray-500">{c.funnel_stage}</p>}
                         <p className="text-xs text-gray-600 mt-0.5">{c.description}</p>
+                        <button
+                          type="button"
+                          className="text-xs text-accentBlue mt-1"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            copyPromptForConcept(c);
+                          }}
+                        >
+                          📋 Copy Prompt ไป GPT
+                        </button>
                       </div>
                     </div>
                   </label>
@@ -651,9 +686,18 @@ export default function BannerGeneratorClient({ history: initialHistory, product
               })}
             </div>
           </div>
-          <button type="button" className="btn-primary" disabled={generating || selectedConceptIds.size === 0} onClick={generateSelectedFromAnalysis}>
-            {generating ? 'กำลังสร้างภาพ...' : `สร้างภาพจาก Concept ที่เลือก (${selectedConceptIds.size})`}
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className="btn-primary" disabled={generating || selectedConceptIds.size === 0} onClick={generateSelectedFromAnalysis}>
+              {generating ? 'กำลังสร้างภาพ...' : `สร้างภาพจาก Concept ที่เลือก (${selectedConceptIds.size})`}
+            </button>
+            <button type="button" className="btn-secondary" disabled={selectedConceptIds.size === 0} onClick={copyPromptsForSelected}>
+              📋 Copy Prompt ทุก Concept ที่เลือกไป GPT
+            </button>
+            {promptCopyMsg && <span className="text-xs text-accentGreen">{promptCopyMsg}</span>}
+          </div>
+          <p className="text-xs text-gray-400">
+            คัดลอก Prompt แล้วยังไม่แน่ใจผล ลองวางใน ChatGPT ก่อนได้ — Prompt ที่คัดลอกเหมือนกับที่ระบบใช้สร้างภาพจริงทุกตัวอักษร แค่ต้องแนบรูปสินค้าเดียวกันเองตอนวางใน ChatGPT
+          </p>
         </div>
       )}
 
