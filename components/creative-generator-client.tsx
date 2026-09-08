@@ -25,6 +25,32 @@ const PLATFORM_OPTIONS = ['TikTok', 'Facebook Reels', 'Instagram Reels', 'Market
 const IDEA_QTY_PRESETS = [5, 10, 20];
 const SCRIPT_QTY_PRESETS = [1, 3, 5];
 
+// Video Style presets — explicit user request: "อยากให้ใช้เป็น Dropdown
+// ตัวเลือก...ให้เยอะหลากหลาย" (was a free-text input). Covers the common
+// short-form content styles for Thai social commerce, plus a custom option
+// since no fixed list covers everything a team might want to try.
+const VIDEO_STYLE_CUSTOM = '__custom__';
+const VIDEO_STYLE_OPTIONS = [
+  'UGC สมจริง มือถือ',
+  'UGC รีวิวพูดคุยหน้ากล้อง (Talking-head)',
+  'Founder Story เจ้าของแบรนด์เล่าเอง',
+  'Unboxing เปิดกล่อง',
+  'Before/After เปรียบเทียบก่อน-หลัง',
+  'Tutorial สอนใช้งานทีละขั้นตอน',
+  'Product Demo โชว์สินค้าเน้นๆ',
+  'Testimonial ลูกค้าพูดถึงสินค้า',
+  'Storytelling เล่าเรื่องมีปมดราม่า',
+  'Day in the Life วันธรรมดาของลูกค้า',
+  'Vlog ไลฟ์สไตล์ประจำวัน',
+  'Comedy / Skit ตลกขบขัน',
+  'Interview สัมภาษณ์พูดคุย',
+  'ASMR เสียงกระตุ้นความรู้สึก',
+  'Stop Motion แอนิเมชันขยับทีละเฟรม',
+  'Split Screen แบ่งจอเปรียบเทียบ',
+  'Meme / Text-on-screen นำเรื่อง',
+  'Cinematic เนี้ยบมืออาชีพ'
+];
+
 function downloadFile(filename: string, content: string, mime: string) {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -77,7 +103,8 @@ export default function CreativeGeneratorClient({
   // Step 3 state
   const [sceneCount, setSceneCount] = useState(6);
   const [durationTarget, setDurationTarget] = useState(30);
-  const [videoStyle, setVideoStyle] = useState('UGC สมจริง มือถือ');
+  const [videoStyle, setVideoStyle] = useState(VIDEO_STYLE_OPTIONS[0]);
+  const [customVideoStyle, setCustomVideoStyle] = useState(false);
   const [aiFootageMix, setAiFootageMix] = useState('40% AI Generated / 60% Real Footage');
   const [storyboards, setStoryboards] = useState<Storyboard[]>([]);
   const [loadingStoryboards, setLoadingStoryboards] = useState(false);
@@ -589,7 +616,40 @@ export default function CreativeGeneratorClient({
             </div>
             <div>
               <label className="field-label">Video Style</label>
-              <input value={videoStyle} onChange={(e) => setVideoStyle(e.target.value)} />
+              {!customVideoStyle ? (
+                <select
+                  value={videoStyle}
+                  onChange={(e) => {
+                    if (e.target.value === VIDEO_STYLE_CUSTOM) {
+                      setCustomVideoStyle(true);
+                      setVideoStyle('');
+                    } else {
+                      setVideoStyle(e.target.value);
+                    }
+                  }}
+                >
+                  {VIDEO_STYLE_OPTIONS.map((v) => (
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
+                  ))}
+                  <option value={VIDEO_STYLE_CUSTOM}>— กำหนดเอง —</option>
+                </select>
+              ) : (
+                <div className="flex gap-2">
+                  <input value={videoStyle} onChange={(e) => setVideoStyle(e.target.value)} placeholder="พิมพ์ Video Style เอง..." autoFocus />
+                  <button
+                    type="button"
+                    className="btn-secondary !px-2 !text-xs whitespace-nowrap"
+                    onClick={() => {
+                      setCustomVideoStyle(false);
+                      setVideoStyle(VIDEO_STYLE_OPTIONS[0]);
+                    }}
+                  >
+                    ← เลือกจากรายการ
+                  </button>
+                </div>
+              )}
             </div>
             <div>
               <label className="field-label">AI / Real Footage Mix</label>
