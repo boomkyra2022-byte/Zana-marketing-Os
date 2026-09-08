@@ -21,7 +21,8 @@ export default async function CreativeGeneratorPage({
     { data: knowledgeItems },
     { data: recentIdeas },
     { data: recentScripts },
-    { data: recentStoryboards }
+    { data: recentStoryboards },
+    { data: models }
   ] = await Promise.all([
     // Extra columns beyond id/product_name/brand are for the Banner
     // Generator's "เลือกสินค้าจากคลัง" autofill (explicit user request) —
@@ -51,7 +52,17 @@ export default async function CreativeGeneratorPage({
     // "ใช้ต่อ" click merges one of these straight into React state.
     supabase.from('ideas').select('*').order('created_at', { ascending: false }).limit(20),
     supabase.from('scripts').select('*').order('created_at', { ascending: false }).limit(20),
-    supabase.from('storyboards').select('*').order('created_at', { ascending: false }).limit(20)
+    supabase.from('storyboards').select('*').order('created_at', { ascending: false }).limit(20),
+    // Model Library picker for the Visual Hook Banner mode's Creative Brief
+    // — active presets only (archived ones stay reachable at /models but
+    // shouldn't clutter this dropdown). reference_images.length is used
+    // client-side to know whether Identity Lock has a real photo to work
+    // with; no need to sign the actual images just to show a count.
+    supabase
+      .from('model_presets')
+      .select('id, name, type, identity_lock, identity_prompt, locked_features, editable_features, reference_images')
+      .eq('active', true)
+      .order('created_at', { ascending: false })
   ]);
 
   // Deep-link reuse from /content-library ("ใช้ต่อ" there navigates here with
@@ -89,6 +100,7 @@ export default async function CreativeGeneratorPage({
           recentIdeas={recentIdeas ?? []}
           recentScripts={recentScripts ?? []}
           recentStoryboards={recentStoryboards ?? []}
+          models={models ?? []}
           initialIdea={initialIdea}
           initialScript={initialScript}
         />

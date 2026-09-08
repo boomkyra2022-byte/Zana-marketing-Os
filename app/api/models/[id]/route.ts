@@ -1,0 +1,71 @@
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { createClient } from '@/lib/supabase/server';
+
+export const runtime = 'nodejs';
+
+// Partial update — also how "Archive Preset" works (PATCH { active: false }),
+// per the spec (no hard delete for Model Presets, only archive).
+const patchSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  type: z.enum(['founder', 'ai_model', 'custom']).optional(),
+  reference_images: z.array(z.string()).max(5).optional(),
+  locked_features: z.array(z.string()).optional(),
+  editable_features: z.array(z.string()).optional(),
+  identity_lock: z.boolean().optional(),
+  identity_prompt: z.string().max(2000).nullable().optional(),
+  negative_prompt: z.string().max(2000).nullable().optional(),
+  thumbnail: z.string().nullable().optional(),
+  active: z.boolean().optional()
+});
+
+export async function GET(request: Request, { params }: { params: { id: string } }) {
+  const supabase = createClient();
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { data, error } = await supabase.from('model_presets').select('*').eq('id', params.id).single();
+  if (error || !data) return NextResponse.json({ error: error?.message || 'ไม่พบ Model Preset นี้' }, { status: 404 });
+  return NextResponse.json({ model: data });
+}
+
+export async function PATCH(request: Request, { params }: { params: { id: string } }) {
+  const supabase = createClient();
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+  const parsed = patchSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+  }
+  const input = parsed.data;
+  const patch: Record<string, unknown> = { ...input, updated_at: new Date().toISOString() };
+  if (input.reference_images) {
+    patch.master_reference = input.reference_images[0] ?? null;
+    if (!('thumbnail' in input)) patch.thumbnail = input.reference_images[0] ?? null;
+  }
+
+  const { data, error } = await supabase.from('model_presets').update(patch).eq('id', params.id).select('*').single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await supabase.from('activity_logs').insert({
+    user_id: user.id,
+    action: input.active === false ? 'model_preset_archive' : input.active === true ? 'model_preset_restore' : 'model_preset_update',
+    entity_type: 'model_preset',
+    entity_id: params.id,
+    new_value: input,
+    reason: `แก้ไข Model Preset: ${data.name}`
+  });
+
+  return NextResponse.json({ model: data });
+}

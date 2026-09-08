@@ -63,6 +63,17 @@ interface KnowledgeItemRecord {
   product_ids?: string[] | null;
 }
 
+interface ModelPresetRecord {
+  id: string;
+  name: string;
+  type: 'founder' | 'ai_model' | 'custom';
+  identity_lock: boolean;
+  identity_prompt: string | null;
+  locked_features: string[];
+  editable_features: string[];
+  reference_images: string[];
+}
+
 interface Props {
   products: ProductRecord[];
   personas: { id: string; name: string }[];
@@ -71,6 +82,7 @@ interface Props {
   recentIdeas: any[];
   recentScripts: any[];
   recentStoryboards: any[];
+  models: ModelPresetRecord[];
   initialIdea: any | null;
   initialScript: any | null;
 }
@@ -83,6 +95,7 @@ export default function CreativeGeneratorPageClient({
   recentIdeas,
   recentScripts,
   recentStoryboards,
+  models,
   initialIdea,
   initialScript
 }: Props) {
@@ -122,7 +135,21 @@ export default function CreativeGeneratorPageClient({
           initialScript={initialScript}
         />
       )}
-      {tab === 'visual_hook_banner' && <VisualHookBannerClient products={products} />}
+      {tab === 'visual_hook_banner' && (
+        <VisualHookBannerClient
+          products={products}
+          models={models.map((m) => ({
+            id: m.id,
+            name: m.name,
+            type: m.type,
+            identity_lock: m.identity_lock,
+            identity_prompt: m.identity_prompt,
+            locked_features: m.locked_features,
+            editable_features: m.editable_features,
+            reference_image_count: m.reference_images?.length ?? 0
+          }))}
+        />
+      )}
       {tab === 'banner' && <BannerGeneratorClient history={bannerHistory} products={products} knowledgeItems={knowledgeItems} />}
       {tab === 'caption' && <CaptionGeneratorClient products={products} personas={personas} />}
       {(tab === 'ecommerce_image' || tab === 'reels_video') && (

@@ -1,15 +1,23 @@
 import type { Product } from '@/types/database';
+import { LibraryImagePicker, type LibraryImage } from '@/components/library-image-picker';
 
 export function ProductForm({
   product,
   action,
   error,
-  submitLabel
+  submitLabel,
+  initialPackshots = [],
+  initialReferenceImages = []
 }: {
   product?: Partial<Product>;
   action: (formData: FormData) => void;
   error?: string;
   submitLabel: string;
+  // Pre-signed URLs for this product's already-saved packshots/reference
+  // images (server component computes these via signLibraryPaths before
+  // rendering — a client component can't sign with the service-role key).
+  initialPackshots?: LibraryImage[];
+  initialReferenceImages?: LibraryImage[];
 }) {
   return (
     <form action={action} className="space-y-6 max-w-3xl">
@@ -94,6 +102,73 @@ export function ProductForm({
       <div>
         <label className="field-label" htmlFor="compliance_notes">Compliance Notes</label>
         <textarea id="compliance_notes" name="compliance_notes" rows={2} defaultValue={product?.compliance_notes ?? ''} />
+      </div>
+
+      {/* Product Library upgrade — explicit spec: "ภาพสินค้าจริง...ใช้เป็น
+          Source of Truth". packshots/reference_images are LibraryImagePicker
+          leaves (client components) rendered inside this otherwise
+          server-action form; each writes its own hidden JSON-array input,
+          parsed back out by productPayload() in actions.ts. */}
+      <div className="grid grid-cols-2 gap-4">
+        <LibraryImagePicker
+          name="packshots"
+          label="Packshot จริง (Source of Truth — ห้าม AI วาดใหม่)"
+          folder="products"
+          maxFiles={6}
+          initial={initialPackshots}
+        />
+        <LibraryImagePicker
+          name="reference_images"
+          label="ภาพอ้างอิงเพิ่มเติม (ไม่บังคับ)"
+          folder="products"
+          maxFiles={6}
+          initial={initialReferenceImages}
+        />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input id="preserve_packaging" name="preserve_packaging" type="checkbox" defaultChecked={product?.preserve_packaging ?? true} />
+        <label htmlFor="preserve_packaging" className="mb-0">Preserve Packaging 100% (ห้ามเปลี่ยนโลโก้/รูปทรง/สี/ข้อความบนแพ็กเกจ)</label>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="field-label" htmlFor="target_audience">Target Audience</label>
+          <textarea id="target_audience" name="target_audience" rows={2} defaultValue={product?.target_audience ?? ''} />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="pain_points">Pain Points</label>
+          <textarea id="pain_points" name="pain_points" rows={2} defaultValue={product?.pain_points ?? ''} />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="product_reasons">Product Reasons (เหตุผลที่ควรซื้อ)</label>
+          <textarea id="product_reasons" name="product_reasons" rows={2} defaultValue={product?.product_reasons ?? ''} />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="proofs">Proofs (หลักฐาน/รีวิว/ผลลัพธ์)</label>
+          <textarea id="proofs" name="proofs" rows={2} defaultValue={product?.proofs ?? ''} />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="promotion">Promotion / Offer</label>
+          <input id="promotion" name="promotion" defaultValue={product?.promotion ?? ''} />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="cta">CTA</label>
+          <input id="cta" name="cta" defaultValue={product?.cta ?? ''} />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="brand_colors">Brand Colors</label>
+          <input id="brand_colors" name="brand_colors" placeholder="เช่น #FF6B9D, #FFFFFF" defaultValue={product?.brand_colors ?? ''} />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="registration_number">เลขที่จดแจ้ง / อย.</label>
+          <input id="registration_number" name="registration_number" defaultValue={product?.registration_number ?? ''} />
+        </div>
+      </div>
+
+      <div>
+        <label className="field-label" htmlFor="packaging_lock_prompt">Packaging Lock Prompt (ไม่บังคับ — ปล่อยว่างให้ระบบสร้างให้อัตโนมัติ)</label>
+        <textarea id="packaging_lock_prompt" name="packaging_lock_prompt" rows={2} defaultValue={product?.packaging_lock_prompt ?? ''} />
       </div>
 
       <div className="flex gap-3">

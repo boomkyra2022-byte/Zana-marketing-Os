@@ -47,6 +47,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: '/content-library', label: 'Content Library' },
       { href: '/flow-prompt', label: 'Flow Prompt Director' },
       { href: '/products', label: 'Products' },
+      { href: '/models', label: 'Model Library' },
       { href: '/personas', label: 'Personas' }
     ]
   },

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { VisualIdea, PromptStudioBlockState, PromptStudioPreset } from '@/types/database';
+import type { VisualIdea, PromptStudioBlockState, PromptStudioPreset, ModelPreset } from '@/types/database';
 import {
   PROMPT_STUDIO_BLOCK_DEFS,
   seedPromptStudioBlocks,
@@ -11,12 +11,15 @@ import {
   type PromptProvider
 } from '@/prompts/visual-hook-banner';
 
-// Visual Hook Banner mode — Phase 1 of the new Creative Brief -> AI Visual
-// Ideas -> Prompt Studio -> Generation Destination workflow (explicit user
-// spec). Scoped per the user's own choice: this is the ONE mode built fully
-// for now; Model Identity is free text (no Model Library yet — Phase 2);
-// "Generate Inside ZANA OS" only actually calls a provider for OpenAI (the
-// only one with a configured key) — every other provider is honestly
+// Visual Hook Banner mode — Creative Brief -> AI Visual Ideas -> Prompt
+// Studio -> Generation Destination workflow (explicit user spec). Scoped per
+// the user's own choice: this is the ONE mode built fully. Model+Product
+// Library upgrade (later spec): Model Identity is now a real picker backed
+// by the Model Library (with a free-text fallback that still works exactly
+// as before), and "Generate Inside ZANA OS" uses the selected Model's real
+// reference photos / the selected Product's real packshots via OpenAI
+// image-to-image (editImages) when available — a genuine effect on the
+// pixels, not just prompt text. Every other provider stays honestly
 // export-only, never a fake "Generate" button.
 
 interface ProductOption {
@@ -25,9 +28,38 @@ interface ProductOption {
   brand: string;
 }
 
+interface ModelOption {
+  id: string;
+  name: string;
+  type: ModelPreset['type'];
+  identity_lock: boolean;
+  identity_prompt: string | null;
+  locked_features: string[];
+  editable_features: string[];
+  reference_image_count: number;
+}
+
 interface Props {
   products: ProductOption[];
+  models: ModelOption[];
 }
+
+const VISUAL_HOOK_TYPES = [
+  'Real-life Situation',
+  'Problem–Solution',
+  'Founder Trust',
+  'QR Verification',
+  'Review / Social Proof',
+  'News Editorial',
+  'Dark Marketing',
+  'Red Bag',
+  'Dark Vault',
+  'Product Hero',
+  'Lifestyle',
+  'Comparison',
+  'Educational',
+  'Promotion'
+];
 
 type Step = 1 | 2 | 3 | 4;
 type Destination = 'inside' | 'export';
@@ -68,13 +100,18 @@ function downloadFile(filename: string, content: string, mime: string) {
   URL.revokeObjectURL(url);
 }
 
-export default function VisualHookBannerClient({ products }: Props) {
+export default function VisualHookBannerClient({ products, models }: Props) {
   const [step, setStep] = useState<Step>(1);
 
   // Creative Brief state — deliberately independent of each other so
   // switching product never resets Model Identity and vice versa (explicit
-  // spec requirement).
+  // spec requirement — Model and Product are independent entities, no FK
+  // between model_presets and products at all).
   const [productId, setProductId] = useState('');
+  const [modelPresetId, setModelPresetId] = useState('');
+  // Supplementary free-text — still fully usable on its own with no preset
+  // selected (backward compatible with the original free-text-only field),
+  // and additive on top of a selected preset (e.g. "ยืนยิ้มถือสินค้ามือขวา").
   const [modelIdentity, setModelIdentity] = useState('');
   const [funnelStage, setFunnelStage] = useState('');
   const [platform, setPlatform] = useState('TikTok');
@@ -108,11 +145,32 @@ export default function VisualHookBannerClient({ products }: Props) {
   const [variationCount, setVariationCount] = useState(1);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState('');
-  const [results, setResults] = useState<{ signed_urls: string[]; estimated_cost: number; created_at: string; model: string }[]>([]);
+  const [results, setResults] = useState<
+    { signed_urls: string[]; estimated_cost: number; created_at: string; model: string; used_reference_images: number; used_identity_lock: boolean; used_packaging_lock: boolean }[]
+  >([]);
+
+  const selectedModel = models.find((m) => m.id === modelPresetId) || null;
+
+  // Composes the preset's locked identity + feature rules with the
+  // freeform supplementary text into one description string — kept as a
+  // single string because prompts/visual-hook-banner.ts's VisualBriefInput
+  // already treats modelIdentity as one free-text block end to end (Idea
+  // generation, Prompt Studio seeding); no backend schema change needed.
+  function effectiveModelIdentity(): string {
+    const parts: string[] = [];
+    if (selectedModel) {
+      parts.push(`${selectedModel.name}${selectedModel.identity_lock ? ' (Identity Lock: ต้องคงใบหน้าเดิม)' : ''}`);
+      if (selectedModel.identity_prompt) parts.push(selectedModel.identity_prompt);
+      if (selectedModel.locked_features.length) parts.push(`ห้ามเปลี่ยน: ${selectedModel.locked_features.join(', ')}`);
+      if (selectedModel.editable_features.length) parts.push(`เปลี่ยนได้: ${selectedModel.editable_features.join(', ')}`);
+    }
+    if (modelIdentity.trim()) parts.push(modelIdentity.trim());
+    return parts.join('\n');
+  }
 
   function brief() {
     return {
-      modelIdentity: modelIdentity || undefined,
+      modelIdentity: effectiveModelIdentity() || undefined,
       funnelStage: funnelStage || undefined,
       platform: platform || undefined,
       objective: objective || undefined,
@@ -263,12 +321,24 @@ export default function VisualHookBannerClient({ products }: Props) {
           quality,
           n: variationCount,
           product_id: productId || null,
-          visual_idea_id: selectedIdea?.id || null
+          visual_idea_id: selectedIdea?.id || null,
+          model_preset_id: modelPresetId || null
         })
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'สร้างภาพไม่สำเร็จ');
-      setResults((prev) => [{ signed_urls: json.signed_urls, estimated_cost: json.estimated_cost, created_at: json.created_at, model: json.model }, ...prev]);
+      setResults((prev) => [
+        {
+          signed_urls: json.signed_urls,
+          estimated_cost: json.estimated_cost,
+          created_at: json.created_at,
+          model: json.model,
+          used_reference_images: json.used_reference_images ?? 0,
+          used_identity_lock: !!json.used_identity_lock,
+          used_packaging_lock: !!json.used_packaging_lock
+        },
+        ...prev
+      ]);
       setStep(4);
     } catch (err: any) {
       setGenerateError(err.message || 'เกิดข้อผิดพลาด');
@@ -282,8 +352,19 @@ export default function VisualHookBannerClient({ products }: Props) {
   }
 
   function downloadReferencePackage() {
+    // NOTE: this is a .txt summary, not the ZIP-of-actual-images the full
+    // spec describes (master-prompt.txt + real packshot/reference PNGs +
+    // layout-guide.json etc bundled together) — that needs a zip library
+    // this project doesn't have installed yet (deliberately not added this
+    // batch, disclosed in TODO.md). Everything text-based the ZIP would
+    // have contained is included here; only the actual image binaries are
+    // missing (download them individually from Model Library / Products).
     const text = `=== ZANA Visual Hook Banner — Reference Package ===
 Generated: ${new Date().toLocaleString('th-TH')}
+
+--- Model ---
+${selectedModel ? `${selectedModel.name}${selectedModel.identity_lock ? ' (Identity Lock)' : ''} — ${selectedModel.reference_image_count} รูปอ้างอิงในระบบ` : 'ไม่ระบุ Model Preset'}
+${modelIdentity ? `เพิ่มเติม: ${modelIdentity}` : ''}
 
 --- Product ---
 ${selectedProduct ? `${selectedProduct.brand} — ${selectedProduct.product_name}` : 'ไม่ระบุสินค้าเฉพาะ'}
@@ -301,7 +382,7 @@ ${formattedPrompt}
   }
 
   function downloadJSON() {
-    const payload = { product: selectedProduct, idea: selectedIdea, blocks, provider, ratio: outputRatio, formattedPrompt };
+    const payload = { model: selectedModel, modelIdentityNote: modelIdentity, product: selectedProduct, idea: selectedIdea, blocks, provider, ratio: outputRatio, formattedPrompt };
     downloadFile(`visual-hook-banner-${Date.now()}.json`, JSON.stringify(payload, null, 2), 'application/json');
   }
 
@@ -339,10 +420,35 @@ ${formattedPrompt}
                   </option>
                 ))}
               </select>
+              <a href="/products/new" target="_blank" rel="noreferrer" className="text-xs text-accentBlue">
+                + เพิ่มสินค้าใหม่ใน Product Library
+              </a>
             </div>
             <div>
-              <label className="field-label">Model Preset (คำอธิบายนางแบบ/พรีเซนเตอร์ — พิมพ์เอง)</label>
-              <input value={modelIdentity} onChange={(e) => setModelIdentity(e.target.value)} placeholder="เช่น หญิงไทยวัย 30 ยิ้มสดใส ผมยาว" />
+              <label className="field-label">Model Preset</label>
+              <select value={modelPresetId} onChange={(e) => setModelPresetId(e.target.value)}>
+                <option value="">— Product Only / อธิบายเอง —</option>
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} {m.identity_lock ? '🔒' : ''} ({m.reference_image_count} รูป)
+                  </option>
+                ))}
+              </select>
+              <a href="/models/new" target="_blank" rel="noreferrer" className="text-xs text-accentBlue">
+                + เพิ่ม Model ใหม่ใน Model Library
+              </a>
+              {selectedModel && selectedModel.identity_lock && selectedModel.reference_image_count === 0 && (
+                <div className="text-xs mt-1 rounded p-2" style={{ background: 'var(--accent-strategy-tint)', color: 'var(--accent-strategy)' }}>
+                  ⚠ Model นี้ยังไม่มีรูปอ้างอิงในระบบ — Generate ภายในระบบจะเป็น Text-to-image เท่านั้น ใบหน้าอาจไม่ตรงต้นฉบับ 100%
+                  แนะนำอัปโหลดรูปที่ Model Library ก่อน
+                </div>
+              )}
+              <input
+                className="mt-2"
+                value={modelIdentity}
+                onChange={(e) => setModelIdentity(e.target.value)}
+                placeholder={selectedModel ? 'รายละเอียดเพิ่มเติม (ไม่บังคับ) เช่น ท่ายืนถือสินค้ามือขวา' : 'หรือพิมพ์อธิบายเอง เช่น หญิงไทยวัย 30 ยิ้มสดใส ผมยาว'}
+              />
             </div>
             <div>
               <label className="field-label">Funnel Stage</label>
@@ -393,9 +499,21 @@ ${formattedPrompt}
               <label className="field-label">Content Style</label>
               <input value={contentStyle} onChange={(e) => setContentStyle(e.target.value)} placeholder="เช่น Premium clean, Cute pastel" />
             </div>
-            <div>
+            <div className="col-span-2">
               <label className="field-label">Visual Hook (ไอเดียเริ่มต้น ไม่บังคับ)</label>
-              <input value={visualHookSeed} onChange={(e) => setVisualHookSeed(e.target.value)} />
+              <input value={visualHookSeed} onChange={(e) => setVisualHookSeed(e.target.value)} placeholder="พิมพ์เอง หรือเลือกจากแนวด้านล่าง" />
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {VISUAL_HOOK_TYPES.map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setVisualHookSeed((prev) => (prev.includes(t) ? prev : prev ? `${prev}, ${t}` : t))}
+                    className="text-xs px-2 py-1 rounded-full border border-border text-gray-500 hover:border-accentBlue hover:text-accentBlue"
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
             </div>
             <div>
               <label className="field-label">Hook Strength</label>
@@ -597,7 +715,7 @@ ${formattedPrompt}
               {isExportOnlyProvider && (
                 <div className="text-sm rounded-lg p-3" style={{ background: 'var(--accent-strategy-tint)', color: 'var(--accent-strategy)' }}>
                   ⚠ {PROVIDER_OPTIONS.find((p) => p.value === provider)?.label} ยังไม่ได้เชื่อมต่อ API จริงในระบบนี้ (Phase 2) — ระบบจะใช้ <b>OpenAI</b> สร้างภาพให้แทน
-                  หรือกด "Export to External AI" เพื่อคัดลอก Prompt ไปใช้กับ {PROVIDER_OPTIONS.find((p) => p.value === provider)?.label} เองได้เลย
+                  หรือกด &ldquo;Export to External AI&rdquo; เพื่อคัดลอก Prompt ไปใช้กับ {PROVIDER_OPTIONS.find((p) => p.value === provider)?.label} เองได้เลย
                 </div>
               )}
               <div className="grid grid-cols-2 gap-4">
@@ -630,6 +748,11 @@ ${formattedPrompt}
               </div>
               <div className="text-sm text-gray-500">
                 Estimated Cost: ~${((quality === 'low' ? 0.011 : quality === 'medium' ? 0.042 : 0.167) * variationCount).toFixed(3)} USD (ประมาณการ ไม่ใช่ยอดเรียกเก็บจริง)
+              </div>
+              <div className="text-xs text-gray-400">
+                {selectedModel && selectedModel.reference_image_count > 0 && '🔒 ใช้รูปอ้างอิงจริงจาก Model Library เพื่อคง Identity — '}
+                {selectedProduct && '📦 ใช้ Packshot จริงจาก Product Library (ถ้ามี และเปิด Preserve Packaging) — '}
+                {!selectedModel?.reference_image_count && !selectedProduct && 'ไม่มีรูปอ้างอิง — จะเป็น Text-to-image ล้วน'}
               </div>
               {generateError && <div className="text-red-600 text-sm">{generateError}</div>}
               <button className="btn-primary" disabled={generating} onClick={handleGenerateInside}>
@@ -671,6 +794,13 @@ ${formattedPrompt}
                 <div key={i} className="card p-4">
                   <div className="text-xs text-gray-400 mb-2">
                     {r.model} · ~${r.estimated_cost.toFixed(3)} · {new Date(r.created_at).toLocaleString('th-TH')}
+                    {r.used_reference_images > 0 && (
+                      <span className="ml-2 text-accentGreen">
+                        · ใช้รูปอ้างอิงจริง {r.used_reference_images} ภาพ{r.used_identity_lock ? ' (Identity)' : ''}
+                        {r.used_packaging_lock ? ' (Packaging)' : ''}
+                      </span>
+                    )}
+                    {r.used_reference_images === 0 && <span className="ml-2 text-orange-500">· Text-to-image ล้วน ไม่มีรูปอ้างอิง</span>}
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     {r.signed_urls.map((url, j) => (

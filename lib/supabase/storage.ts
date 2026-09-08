@@ -69,3 +69,52 @@ export async function signSourceUpload(userId: string, path: string): Promise<st
   }
   return data.signedUrl;
 }
+
+// --- Model Library / Product Library reference images ---
+// Same direct-from-device pattern as source-uploads (browser uploads
+// straight to Storage under its own uid folder — see
+// 0021_model_product_library.sql for the bucket/RLS). Server-side, every
+// page that displays these images re-signs them fresh on each render
+// (Server Components re-run per request, so there's no stale-signed-URL
+// problem to solve — no caching needed).
+const LIBRARY_BUCKET = 'library-uploads';
+const LIBRARY_SIGNED_URL_TTL_SEC = 60 * 60 * 24; // 24h, plenty for one page render + a save cycle
+
+// Downloads reference images (Model Library photos / Product packshots)
+// server-side so a generation route can hand them to editImages() as real
+// image-to-image input — this is what makes "Identity Lock" / "Preserve
+// Packaging" a real effect on the generated image instead of just prompt
+// text. Skips (does not throw on) any path that fails to download, since a
+// generation should still proceed text-only rather than hard-fail because
+// one reference photo went missing.
+export async function downloadLibraryImages(
+  paths: string[]
+): Promise<{ buffer: Buffer; filename: string; contentType: string }[]> {
+  if (paths.length === 0) return [];
+  const serviceClient = createServiceRoleClient();
+  const results = await Promise.all(
+    paths.map(async (path) => {
+      const { data, error } = await serviceClient.storage.from(LIBRARY_BUCKET).download(path);
+      if (error || !data) return null;
+      const arrayBuffer = await data.arrayBuffer();
+      return {
+        buffer: Buffer.from(arrayBuffer),
+        filename: path.split('/').pop() || 'reference.jpg',
+        contentType: data.type || 'image/jpeg'
+      };
+    })
+  );
+  return results.filter((r): r is { buffer: Buffer; filename: string; contentType: string } => r !== null);
+}
+
+export async function signLibraryPaths(paths: string[]): Promise<Record<string, string>> {
+  if (paths.length === 0) return {};
+  const serviceClient = createServiceRoleClient();
+  const entries = await Promise.all(
+    paths.map(async (path) => {
+      const { data, error } = await serviceClient.storage.from(LIBRARY_BUCKET).createSignedUrl(path, LIBRARY_SIGNED_URL_TTL_SEC);
+      return [path, error || !data?.signedUrl ? '' : data.signedUrl] as const;
+    })
+  );
+  return Object.fromEntries(entries.filter(([, url]) => url));
+}

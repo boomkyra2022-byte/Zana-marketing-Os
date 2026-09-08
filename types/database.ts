@@ -39,6 +39,49 @@ export interface Product {
   compliance_notes: string | null;
   stock: number | null;
   is_hero: boolean;
+  // Product Library upgrade (0021_model_product_library.sql) — additive,
+  // supports the Creative Brief's product-selection step. packshots is the
+  // real "Source of Truth" image set (never AI-redrawn); reference_images is
+  // extra context photos (lifestyle, packaging angles, etc).
+  packshots: string[];
+  reference_images: string[];
+  brand_colors: string | null;
+  target_audience: string | null;
+  pain_points: string | null;
+  product_reasons: string | null;
+  proofs: string | null;
+  promotion: string | null;
+  cta: string | null;
+  registration_number: string | null;
+  packaging_lock_prompt: string | null;
+  preserve_packaging: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// ============================================================
+// Model Library (see supabase/migrations/0021_model_product_library.sql)
+// ============================================================
+// Deliberately has NO foreign key to products — Model and Product are
+// independent entities per the explicit spec requirement ("ห้ามผูก Model
+// หนึ่งคนกับสินค้าหนึ่งชิ้นแบบตายตัว"): one model can hold many products, one
+// product can be shown with many models.
+export type ModelPresetType = 'founder' | 'ai_model' | 'custom';
+
+export interface ModelPreset {
+  id: string;
+  name: string;
+  type: ModelPresetType;
+  master_reference: string | null;
+  reference_images: string[];
+  locked_features: string[];
+  editable_features: string[];
+  identity_lock: boolean;
+  identity_prompt: string | null;
+  negative_prompt: string | null;
+  thumbnail: string | null;
+  active: boolean;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -336,6 +379,11 @@ export interface GenerationLog {
   status: GenerationLogStatus;
   error: string | null;
   result_paths: string[];
+  // Model+Product Library upgrade (0021) — additive, traces a generation
+  // back to exactly which Model Preset / Product / Idea produced it.
+  model_preset_id: string | null;
+  product_preset_id: string | null;
+  creative_idea_id: string | null;
   created_at: string;
 }
 

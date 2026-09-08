@@ -18,6 +18,22 @@ function str(formData: FormData, key: string): string | null {
   return s === '' ? null : s;
 }
 
+// Packshots/reference images arrive as a JSON-stringified array of Storage
+// paths, written into a hidden input by LibraryImagePicker (see
+// components/library-image-picker.tsx) after the browser uploads the actual
+// file bytes straight to the `library-uploads` bucket — this form never
+// receives raw file bytes.
+function pathArray(formData: FormData, key: string): string[] {
+  const raw = formData.get(key);
+  if (raw === null) return [];
+  try {
+    const parsed = JSON.parse(String(raw));
+    return Array.isArray(parsed) ? parsed.filter((p) => typeof p === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function productPayload(formData: FormData) {
   return {
     brand: str(formData, 'brand') ?? '',
@@ -36,7 +52,20 @@ function productPayload(formData: FormData) {
     allowed_claims: str(formData, 'allowed_claims'),
     banned_claims: str(formData, 'banned_claims'),
     compliance_notes: str(formData, 'compliance_notes'),
-    is_hero: formData.get('is_hero') === 'on'
+    is_hero: formData.get('is_hero') === 'on',
+    // Product Library upgrade (explicit spec) — additive fields
+    packshots: pathArray(formData, 'packshots'),
+    reference_images: pathArray(formData, 'reference_images'),
+    brand_colors: str(formData, 'brand_colors'),
+    target_audience: str(formData, 'target_audience'),
+    pain_points: str(formData, 'pain_points'),
+    product_reasons: str(formData, 'product_reasons'),
+    proofs: str(formData, 'proofs'),
+    promotion: str(formData, 'promotion'),
+    cta: str(formData, 'cta'),
+    registration_number: str(formData, 'registration_number'),
+    packaging_lock_prompt: str(formData, 'packaging_lock_prompt'),
+    preserve_packaging: formData.get('preserve_packaging') === 'on' // same convention as is_hero above — unchecked checkboxes send nothing at all
   };
 }
 
