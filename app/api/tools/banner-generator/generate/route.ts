@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@/lib/supabase/server';
 import { editImages, type ImageSize } from '@/lib/ai/image-gen';
-import { buildAnalysisMessages, buildConceptImagePrompt, findAdVisualStrategy, type ProductInfo } from '@/prompts/banner-generator';
+import { buildAnalysisMessages, buildConceptImagePrompt, findAdVisualStrategy, type FounderModelInfo, type ProductInfo } from '@/prompts/banner-generator';
 import { uploadEditedClip, resignEditedClip, signLibraryPaths, downloadLibraryImages } from '@/lib/supabase/storage';
 import { AIProviderError, callOpenAIVisionJSON } from '@/lib/ai/openai';
 
@@ -78,7 +78,21 @@ const productInfoShape = {
   // via findAdVisualStrategy() so the actual instruction sent to the AI is
   // always this app's own fixed wording (explicit user request: "เพิ่ม
   // ตัวเลือกกลยุทธ์การทำภาพ ADS").
-  ad_strategy_key: z.string().max(50).optional()
+  ad_strategy_key: z.string().max(50).optional(),
+  // Model Library id, never raw identity text — resolved server-side below
+  // (same lookup pattern as ad_strategy_key) so a client can never spoof a
+  // different founder's identity_prompt into the request body.
+  model_preset_id: z.string().uuid().optional(),
+  // Structured named text-copy fields — explicit follow-up request: "ถ้าจะ
+  // ก๊อปไปควรเป็น Prompt ที่สามารถสร้างงานได้จริง...แบบครบองค์ประกอบหลัก". All
+  // optional — blank means buildConceptImagePrompt() has the AI draft that
+  // block instead (see prompts/banner-generator.ts's textBlock()).
+  scene: z.string().max(1000).optional(),
+  headline: z.string().max(300).optional(),
+  main_message: z.string().max(500).optional(),
+  guarantee_text: z.string().max(500).optional(),
+  badge_text: z.string().max(300).optional(),
+  cta_text: z.string().max(200).optional()
 };
 
 const analyzeSchema = z.object({
@@ -106,19 +120,28 @@ const generateSchema = z.object({
 
 const requestSchema = z.discriminatedUnion('mode', [analyzeSchema, generateSchema]);
 
-function toProductInfo(input: {
-  product_name: string;
-  category?: string;
-  selling_points?: string;
-  on_pack_text?: string;
-  age_size_qty?: string;
-  registration_info?: string;
-  price_or_promo?: string;
-  marketplace?: string;
-  aspect_ratio?: string;
-  prohibitions?: string;
-  ad_strategy_key?: string;
-}): ProductInfo {
+function toProductInfo(
+  input: {
+    product_name: string;
+    category?: string;
+    selling_points?: string;
+    on_pack_text?: string;
+    age_size_qty?: string;
+    registration_info?: string;
+    price_or_promo?: string;
+    marketplace?: string;
+    aspect_ratio?: string;
+    prohibitions?: string;
+    ad_strategy_key?: string;
+    scene?: string;
+    headline?: string;
+    main_message?: string;
+    guarantee_text?: string;
+    badge_text?: string;
+    cta_text?: string;
+  },
+  founderModel?: FounderModelInfo
+): ProductInfo {
   return {
     productName: input.product_name,
     category: input.category,
@@ -130,7 +153,14 @@ function toProductInfo(input: {
     marketplace: input.marketplace,
     aspectRatio: input.aspect_ratio,
     prohibitions: input.prohibitions,
-    adStrategy: findAdVisualStrategy(input.ad_strategy_key)
+    adStrategy: findAdVisualStrategy(input.ad_strategy_key),
+    founderModel,
+    scene: input.scene,
+    headline: input.headline,
+    mainMessage: input.main_message,
+    guaranteeText: input.guarantee_text,
+    badgeText: input.badge_text,
+    ctaText: input.cta_text
   };
 }
 
@@ -268,7 +298,32 @@ export async function POST(request: Request) {
   }
 
   try {
-    const productInfo = toProductInfo(input);
+    // Model Library lookup — explicit follow-up request: the copy-paste
+    // prompt now has a real FOUNDER — SOURCE OF TRUTH section, which needs
+    // the actual identity_prompt/locked/editable features from the chosen
+    // Model Preset, and (same as Visual Hook Banner's own fix) the model's
+    // real reference photo(s) fed into editImages() so Identity Lock is a
+    // real pixel effect, not just prompt text.
+    let founderModel: FounderModelInfo | undefined;
+    let modelRefPaths: string[] = [];
+    if (input.model_preset_id) {
+      const { data: modelPreset } = await supabase
+        .from('model_presets')
+        .select('name, identity_prompt, locked_features, editable_features, reference_images')
+        .eq('id', input.model_preset_id)
+        .single();
+      if (modelPreset) {
+        founderModel = {
+          name: modelPreset.name,
+          identityPrompt: modelPreset.identity_prompt,
+          lockedFeatures: modelPreset.locked_features || [],
+          editableFeatures: modelPreset.editable_features || []
+        };
+        modelRefPaths = (modelPreset.reference_images || []).slice(0, 2);
+      }
+    }
+
+    const productInfo = toProductInfo(input, founderModel);
 
     // Downloads happen server-side from Storage (service-role) — the actual
     // image bytes never travel through this route's own request body.
@@ -276,10 +331,17 @@ export async function POST(request: Request) {
     if (productRefImages.length === 0) {
       return NextResponse.json({ error: 'ไม่พบไฟล์ภาพสินค้าที่อัปโหลด ลองแนบภาพใหม่อีกครั้ง' }, { status: 400 });
     }
+    const modelRefImages = modelRefPaths.length > 0 ? await downloadLibraryImages(modelRefPaths) : [];
     const styleRefImages = input.style_reference ? await downloadLibraryImages([input.style_reference]) : [];
-    const allReferenceImages = styleRefImages[0]
-      ? [...productRefImages, { ...styleRefImages[0], filename: 'style_ref.png' }]
-      : productRefImages;
+    // Capped at 4 total — same gpt-image-1 practical limit/quality tradeoff
+    // already applied in the Visual Hook Banner route. Priority: identity
+    // (model) first, then product packaging, then style reference — those
+    // are the two Source-of-Truth references that must never be dropped.
+    const allReferenceImages = [
+      ...modelRefImages,
+      ...productRefImages,
+      ...(styleRefImages[0] ? [{ ...styleRefImages[0], filename: 'style_ref.png' }] : [])
+    ].slice(0, 4);
 
     // Each concept is its own creative direction → its own prompt → its own
     // API call, run in parallel to keep total wall-clock time reasonable

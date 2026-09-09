@@ -150,7 +150,23 @@ export default function CreativeGeneratorPageClient({
           }))}
         />
       )}
-      {tab === 'banner' && <BannerGeneratorClient history={bannerHistory} products={products} knowledgeItems={knowledgeItems} />}
+      {tab === 'banner' && (
+        <BannerGeneratorClient
+          history={bannerHistory}
+          products={products}
+          knowledgeItems={knowledgeItems}
+          models={models.map((m) => ({
+            id: m.id,
+            name: m.name,
+            type: m.type,
+            identity_lock: m.identity_lock,
+            identity_prompt: m.identity_prompt,
+            locked_features: m.locked_features,
+            editable_features: m.editable_features,
+            reference_image_count: m.reference_images?.length ?? 0
+          }))}
+        />
+      )}
       {tab === 'caption' && <CaptionGeneratorClient products={products} personas={personas} />}
       {(tab === 'ecommerce_image' || tab === 'reels_video') && (
         <div className="card p-8 text-center text-gray-500 space-y-2">

@@ -71,6 +71,23 @@ interface KnowledgeItemRecord {
   product_ids?: string[] | null;
 }
 
+// Model Library picker — same shape creative-generator-page-client.tsx
+// already maps model_presets into for VisualHookBannerClient; reused here
+// verbatim so "3. Ads Banner" can share the same prop without a second
+// server query. Explicit follow-up request: the user's example prompt for a
+// production-caliber ad has a whole FOUNDER — SOURCE OF TRUTH section,
+// which this tool had no way to fill in until now.
+interface ModelOption {
+  id: string;
+  name: string;
+  type: 'founder' | 'ai_model' | 'custom';
+  identity_lock: boolean;
+  identity_prompt: string | null;
+  locked_features: string[];
+  editable_features: string[];
+  reference_image_count: number;
+}
+
 interface Props {
   history: HistoryItem[];
   // Both optional — the standalone /banner-generator page (kept working but
@@ -81,6 +98,7 @@ interface Props {
   // catalog from here.
   products?: ProductRecord[];
   knowledgeItems?: KnowledgeItemRecord[];
+  models?: ModelOption[];
 }
 
 interface AnalysisConcept {
@@ -108,7 +126,8 @@ interface GenerateResultItem {
   error?: string;
 }
 
-export default function BannerGeneratorClient({ history: initialHistory, products: initialProducts, knowledgeItems }: Props) {
+export default function BannerGeneratorClient({ history: initialHistory, products: initialProducts, knowledgeItems, models: modelOptions }: Props) {
+  const models = modelOptions || [];
   // Product facts — matches the system prompt's [INPUT] block field-for-field.
   const [productName, setProductName] = useState('');
   const [brand, setBrand] = useState('');
@@ -127,6 +146,26 @@ export default function BannerGeneratorClient({ history: initialHistory, product
   // text lives server-side (prompts/banner-generator.ts) so it can never be
   // tampered with via the request body.
   const [adStrategyKey, setAdStrategyKey] = useState('');
+
+  // Model Library selection — explicit follow-up request: the user's example
+  // prompt needs a real FOUNDER — SOURCE OF TRUTH section, which requires
+  // knowing which real person (Model Preset) is in the shot. Stores only the
+  // id; the actual identity_prompt/locked/editable features are resolved
+  // from `models` (fetched server-side) so nothing here can drift.
+  const [modelPresetId, setModelPresetId] = useState('');
+  const selectedModel = models.find((m) => m.id === modelPresetId) || null;
+
+  // Structured named text-copy fields — explicit request: "ถ้าจะก๊อปไปควรเป็น
+  // Prompt ที่สามารถสร้างงานได้จริง...แบบครบองค์ประกอบหลัก เช่นตัวอย่างนี้" — the
+  // user's example hard-codes exact copy per named block (Headline/Main
+  // Message/Guarantee/Badge/CTA) rather than leaving it to the AI. All
+  // optional: blank = AI drafts it (old behavior, unchanged).
+  const [scene, setScene] = useState('');
+  const [headline, setHeadline] = useState('');
+  const [mainMessage, setMainMessage] = useState('');
+  const [guaranteeText, setGuaranteeText] = useState('');
+  const [badgeText, setBadgeText] = useState('');
+  const [ctaText, setCtaText] = useState('');
 
   // Product/Knowledge Base picker — explicit user request: "อยากให้เพิ่มการนำ
   // Knowledge base หรือ Product สินค้าแสดงเป็นตัวเลือกเพื่อจะได้ไม่ต้องกรอกใหม่
@@ -266,7 +305,14 @@ export default function BannerGeneratorClient({ history: initialHistory, product
       aspect_ratio: aspectRatio,
       prohibitions: prohibitions.trim() || undefined,
       reference_images: refImagePaths,
-      ad_strategy_key: adStrategyKey || undefined
+      ad_strategy_key: adStrategyKey || undefined,
+      model_preset_id: modelPresetId || undefined,
+      scene: scene.trim() || undefined,
+      headline: headline.trim() || undefined,
+      main_message: mainMessage.trim() || undefined,
+      guarantee_text: guaranteeText.trim() || undefined,
+      badge_text: badgeText.trim() || undefined,
+      cta_text: ctaText.trim() || undefined
     };
   }
 
@@ -290,7 +336,21 @@ export default function BannerGeneratorClient({ history: initialHistory, product
       marketplace: marketplace.trim() || undefined,
       aspectRatio: aspectRatio,
       prohibitions: prohibitions.trim() || undefined,
-      adStrategy: findAdVisualStrategy(adStrategyKey)
+      adStrategy: findAdVisualStrategy(adStrategyKey),
+      founderModel: selectedModel
+        ? {
+            name: selectedModel.name,
+            identityPrompt: selectedModel.identity_prompt,
+            lockedFeatures: selectedModel.locked_features,
+            editableFeatures: selectedModel.editable_features
+          }
+        : undefined,
+      scene: scene.trim() || undefined,
+      headline: headline.trim() || undefined,
+      mainMessage: mainMessage.trim() || undefined,
+      guaranteeText: guaranteeText.trim() || undefined,
+      badgeText: badgeText.trim() || undefined,
+      ctaText: ctaText.trim() || undefined
     };
   }
 
@@ -568,6 +628,61 @@ export default function BannerGeneratorClient({ history: initialHistory, product
           {adStrategyKey && (
             <p className="text-xs text-gray-500 mt-1">{AD_VISUAL_STRATEGIES.find((s) => s.key === adStrategyKey)?.guidance}</p>
           )}
+        </div>
+
+        {models.length > 0 && (
+          <div>
+            <label className="field-label">Model/Founder (ไม่บังคับ — เลือกถ้าต้องการให้มีคนในภาพ)</label>
+            <select value={modelPresetId} onChange={(e) => setModelPresetId(e.target.value)}>
+              <option value="">— ไม่มีคนในภาพ (โชว์สินค้าอย่างเดียว) —</option>
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} {m.type === 'founder' ? '(Founder)' : m.type === 'ai_model' ? '(AI Model)' : ''}
+                </option>
+              ))}
+            </select>
+            {selectedModel && selectedModel.identity_lock && selectedModel.reference_image_count === 0 && (
+              <p className="text-xs text-amber-600 mt-1">
+                ⚠ {selectedModel.name} ตั้งค่า Identity Lock ไว้ แต่ยังไม่มีรูปอ้างอิงในระบบ — ภาพที่ได้จะยึดจากคำอธิบายเท่านั้น ไม่ใช่ใบหน้าจริง
+                ไปอัปโหลดรูปที่ <a href="/models" className="underline">Model Library</a> ก่อนเพื่อคง Identity จริง
+              </p>
+            )}
+          </div>
+        )}
+
+        <div>
+          <label className="field-label">ฉากที่ต้องการ (ไม่บังคับ — ไม่ระบุ = ให้ AI เลือกฉากให้เหมาะกับ Concept เอง)</label>
+          <textarea rows={2} value={scene} onChange={(e) => setScene(e.target.value)} placeholder='เช่น "ห้องน้ำสไตล์มินิมอล แสงธรรมชาติจากหน้าต่าง"' />
+        </div>
+
+        <div className="card p-3 space-y-3 bg-gray-50">
+          <p className="text-xs font-medium text-gray-600">ข้อความบนภาพแบบเจาะจง (ไม่บังคับ — เว้นว่างช่องไหน AI จะแต่งให้ช่องนั้นเอง)</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="field-label">Headline หลัก</label>
+              <input type="text" value={headline} onChange={(e) => setHeadline(e.target.value)} placeholder="ข้อความใหญ่สุดในภาพ" />
+            </div>
+            <div>
+              <label className="field-label">Main Message</label>
+              <input type="text" value={mainMessage} onChange={(e) => setMainMessage(e.target.value)} placeholder="ข้อความสนับสนุน รองจาก Headline" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {selectedModel && (
+              <div>
+                <label className="field-label">Founder Guarantee Panel</label>
+                <input type="text" value={guaranteeText} onChange={(e) => setGuaranteeText(e.target.value)} placeholder="ข้อความรับรองจาก Founder" />
+              </div>
+            )}
+            <div>
+              <label className="field-label">Authenticity Badge</label>
+              <input type="text" value={badgeText} onChange={(e) => setBadgeText(e.target.value)} placeholder="ข้อความ badge/seal" />
+            </div>
+          </div>
+          <div>
+            <label className="field-label">Bottom CTA</label>
+            <input type="text" value={ctaText} onChange={(e) => setCtaText(e.target.value)} placeholder='เช่น "กดสั่งซื้อเลย"' />
+          </div>
         </div>
 
         <div>

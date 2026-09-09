@@ -57,11 +57,16 @@ export async function createTeamMember(formData: FormData): Promise<{ email: str
   if (error) throw new Error(error.message || 'สร้าง account ไม่สำเร็จ');
   if (!data?.user) throw new Error('สร้าง account ไม่สำเร็จ (ไม่ได้รับข้อมูลผู้ใช้กลับมา)');
 
-  // The on_auth_user_created trigger always creates the profiles row with role='viewer'.
-  // Bump it to the chosen role right away (skip the call entirely if 'viewer' was chosen).
-  if (role !== 'viewer') {
-    await serviceClient.from('profiles').update({ role }).eq('id', data.user.id);
-  }
+  // The on_auth_user_created trigger always creates the profiles row with
+  // role='viewer' and status='pending' (see migration 0022 — that's the
+  // default for the public self-signup path). An account created HERE was
+  // already vetted by an admin (this whole function requires requireAdmin()
+  // above), so it should be usable immediately — bump role (if not the
+  // 'viewer' default) and always flip status to 'approved' in one update.
+  // service-role client, not `supabase` — bypasses the anti-privilege-
+  // escalation trigger's admin/owner check cleanly since it runs with no
+  // RLS/auth.uid() context at all (same trust model as createUser() above).
+  await serviceClient.from('profiles').update({ role, status: 'approved' }).eq('id', data.user.id);
 
   revalidatePath('/settings/team');
   return { email, tempPassword };
@@ -72,6 +77,23 @@ export async function updateMemberRole(userId: string, role: string): Promise<vo
   if (!VALID_ROLES.includes(role)) throw new Error('Role ไม่ถูกต้อง');
 
   const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
+  if (error) throw new Error(error.message);
+
+  revalidatePath('/settings/team');
+}
+
+// Approval queue — explicit user request: "ตั้งรหัสเจ้าของสำหรับปลดล็อคการ
+// สมัครสมาชิก หรืออนุมัติให้เข้าใช้งานได้" (chose "ทั้งสองอย่าง"). A public
+// self-signup (even with the correct access code) lands here as
+// status='pending' and is blocked from the whole dashboard by middleware.ts
+// until an admin/owner approves them from this page.
+const VALID_STATUSES = ['pending', 'approved', 'rejected'];
+
+export async function updateMemberStatus(userId: string, status: string): Promise<void> {
+  const { supabase } = await requireAdmin();
+  if (!VALID_STATUSES.includes(status)) throw new Error('สถานะไม่ถูกต้อง');
+
+  const { error } = await supabase.from('profiles').update({ status }).eq('id', userId);
   if (error) throw new Error(error.message);
 
   revalidatePath('/settings/team');

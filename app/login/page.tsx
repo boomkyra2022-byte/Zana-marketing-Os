@@ -51,6 +51,13 @@ export default function LoginPage({
               <label className="field-label" htmlFor="signup_password">Password</label>
               <input id="signup_password" name="password" type="password" required minLength={6} autoComplete="new-password" />
             </div>
+            <div>
+              <label className="field-label" htmlFor="access_code">รหัสเจ้าของ (ขอได้จากเจ้าของระบบ)</label>
+              <input id="access_code" name="access_code" type="password" required autoComplete="off" />
+            </div>
+            <p className="text-xs text-gray-400">
+              สมัครแล้วยังใช้งานไม่ได้ทันที — ต้องยืนยันอีเมลก่อน แล้วรอเจ้าของระบบอนุมัติสิทธิ์ที่หน้า &ldquo;จัดการทีม&rdquo; อีกครั้ง
+            </p>
             <button type="submit" className="btn-secondary w-full">
               สมัครสมาชิก
             </button>

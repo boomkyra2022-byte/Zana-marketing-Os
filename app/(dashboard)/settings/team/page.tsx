@@ -16,6 +16,9 @@ export default async function TeamPage() {
     return <div className="card p-8 text-center text-gray-500">หน้านี้สำหรับแอดมินเท่านั้น</div>;
   }
 
+  // Fetched by join date; team-management-client.tsx groups pending members
+  // to the top client-side (alphabetical status ordering here would put
+  // 'approved' before 'pending', which is backwards for this use case).
   const { data: profiles } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
 
   let members = (profiles ?? []).map((p) => ({ ...p, email: '—' }));
