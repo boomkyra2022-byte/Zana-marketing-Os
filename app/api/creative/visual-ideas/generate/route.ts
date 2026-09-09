@@ -17,7 +17,17 @@ import {
 export const runtime = 'nodejs';
 
 const briefSchema = z.object({
-  modelIdentity: z.string().max(500).optional(),
+  // Real bug found via live user testing: this cap used to be 500, but
+  // visual-hook-banner-client.tsx's effectiveModelIdentity() concatenates
+  // the selected Model Preset's name + identity_lock note + full
+  // identity_prompt + locked_features + editable_features into ONE string
+  // (see that file) — the seeded "คุณชิดชนก — ZANA Founder" preset's own
+  // identity_prompt + feature lists alone already run to ~520 characters
+  // BEFORE any user-typed supplementary text, so selecting that preset and
+  // generating ideas always failed zod validation here with a generic
+  // "Invalid request" the user had no way to diagnose. Raised with real
+  // headroom for supplementary free text on top.
+  modelIdentity: z.string().max(1500, 'คำอธิบาย Model Identity ยาวเกินไป (สูงสุด 1500 ตัวอักษร)').optional(),
   funnelStage: z.string().max(50).optional(),
   platform: z.string().max(50).optional(),
   objective: z.string().max(300).optional(),
@@ -90,7 +100,15 @@ export async function POST(request: Request) {
 
   const parsed = requestSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
+    // Real bug found via live user testing: this used to always return the
+    // generic "Invalid request" with no indication of which field or why —
+    // the user had no way to tell a 500-char overflow apart from a missing
+    // required field. Surface the actual zod issue message when there is
+    // one (readable Thai for the fields with custom messages, e.g.
+    // modelIdentity above); fall back to the generic text only if zod
+    // didn't produce a usable message.
+    const firstIssue = parsed.error.issues[0]?.message;
+    return NextResponse.json({ error: firstIssue || 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
   }
   const input = parsed.data;
 

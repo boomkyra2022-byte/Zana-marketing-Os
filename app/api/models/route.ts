@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
+import { requireNonViewer } from '@/lib/auth/guards';
 
 // Model Library — explicit spec: independent from Product (no FK), reusable
 // across any product/mode. GET + POST in one route.ts, same dual-purpose
@@ -38,6 +39,15 @@ export async function POST(request: Request) {
     data: { user }
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  // Real bug found via live user testing: a 'viewer'-role account got the
+  // raw PostgREST error "Cannot coerce the result to a single JSON object"
+  // when trying to save — RLS correctly blocked the write (model_presets_
+  // write requires current_role() <> 'viewer'), but that just makes the
+  // INSERT...RETURNING affect 0 rows, and `.single()` throws that cryptic
+  // message instead of anything the user can act on. Check explicitly first.
+  const access = await requireNonViewer(supabase, user.id);
+  if (!access.ok) return NextResponse.json({ error: access.message }, { status: 403 });
 
   let body: unknown;
   try {

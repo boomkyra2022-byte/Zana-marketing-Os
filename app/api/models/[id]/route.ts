@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
+import { requireNonViewer } from '@/lib/auth/guards';
 
 export const runtime = 'nodejs';
 
@@ -38,6 +39,15 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  // Real bug found via live user testing: same root cause as app/api/
+  // models/route.ts — a 'viewer' account's UPDATE gets silently filtered to
+  // 0 rows by RLS (model_presets_update requires current_role() <>
+  // 'viewer'), and `.single()` then throws the raw, meaningless "Cannot
+  // coerce the result to a single JSON object" straight to the UI instead
+  // of a message the user can act on. Check the role explicitly first.
+  const access = await requireNonViewer(supabase, user.id);
+  if (!access.ok) return NextResponse.json({ error: access.message }, { status: 403 });
+
   let body: unknown;
   try {
     body = await request.json();
@@ -56,7 +66,15 @@ export async function PATCH(request: Request, { params }: { params: { id: string
   }
 
   const { data, error } = await supabase.from('model_presets').update(patch).eq('id', params.id).select('*').single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    // Defensive fallback in case some OTHER RLS/row-matching condition still
+    // produces this same 0-rows PostgREST error (e.g. a stale/deleted id) —
+    // don't leak the raw Postgres message for this specific known pattern.
+    const friendly = error.message?.includes('Cannot coerce the result to a single JSON object')
+      ? 'บันทึกไม่สำเร็จ — ไม่พบ Model Preset นี้ หรือบัญชีนี้ไม่มีสิทธิ์แก้ไข'
+      : error.message;
+    return NextResponse.json({ error: friendly }, { status: 500 });
+  }
 
   await supabase.from('activity_logs').insert({
     user_id: user.id,

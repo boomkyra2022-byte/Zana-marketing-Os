@@ -318,6 +318,7 @@ export interface FounderModelInfo {
 
 export interface ProductInfo {
   productName: string;
+  brand?: string;
   category?: string;
   sellingPoints?: string;
   onPackText?: string;
@@ -592,8 +593,23 @@ function textBlock(label: string, exactCopy: string | undefined, fallbackDirecti
 // actually attached (input.founderModel) — never fabricated when no model
 // was selected, per the "no dead/fake output" principle already used
 // throughout this app.
-export function buildConceptImagePrompt(input: ProductInfo, concept: ConceptInput): string {
+// Builds one "reserved empty zone" line for textOverlayMode — used instead
+// of textBlock() when the real text will be composited on top afterward by
+// lib/media/text-overlay.tsx, so the image model must NOT attempt to draw
+// these letters itself (that's the whole point: gpt-image-1's own Thai
+// text rendering is the unreliable part being replaced).
+function reservedZone(label: string, hasText: boolean, styleNote: string): string {
+  if (!hasText) return `${label}: not used for this concept — no space needs to be reserved.`;
+  return `${label}: leave a clean, empty, uncluttered zone here — ${styleNote}. Do NOT draw any letters, words, or typography in this zone. The exact text will be composited on top afterward by a separate process — your job is only to leave the visual space ready for it.`;
+}
+
+export function buildConceptImagePrompt(
+  input: ProductInfo,
+  concept: ConceptInput,
+  opts?: { textOverlayMode?: boolean }
+): string {
   const fm = input.founderModel;
+  const textOverlayMode = !!opts?.textOverlayMode;
   const sections: string[] = [];
 
   sections.push(`CORE CONCEPT
@@ -618,7 +634,7 @@ Do not beautify or retouch her into a different-looking person. Do not smooth sk
   // covers packshot/packaging/logo accuracy in more detail than this app's
   // old version did, so it isn't duplicated here).
   sections.push(`PRODUCT FACTS
-${input.productName}
+${input.productName}${input.brand ? ` (Brand: ${input.brand})` : ''}
 Confirmed selling points: ${input.sellingPoints || 'ไม่ระบุ — ห้ามแต่งสรรพคุณเพิ่มเอง'}
 On-pack / required copy: ${input.onPackText || 'ไม่ระบุ'}
 Age / size / quantity: ${input.ageSizeQty || 'ไม่ระบุ'}
@@ -633,21 +649,65 @@ ${input.scene || `${concept.description} — เลือกฉาก/บริ�
 Natural, confident pose appropriate to "${concept.name}". Hands and body proportions must be anatomically correct — no distorted or extra fingers/limbs. Warm, trustworthy expression consistent with a real Thai brand founder, not a stiff generic stock-photo pose.`);
   }
 
-  sections.push(`THAI TEXT
+  if (textOverlayMode) {
+    // Real fix for a real, disclosed limitation (user report: "รูปที่เจนได้มี
+    // ปัญหาฟ้อนอ่านไม่ออก") — instead of asking gpt-image-1 to draw the Thai
+    // copy itself (unreliable, especially for longer headline/CTA text), the
+    // AI is told to leave clean empty space for these 5 zones, and
+    // lib/media/text-overlay.tsx composites the EXACT text the user typed on
+    // top afterward as crisp, guaranteed-legible real typography.
+    sections.push(`TEXT-SAFE ZONES — DO NOT RENDER ANY TEXT IN THIS IMAGE AT ALL
+${reservedZone('Top headline zone', !!input.headline, 'upper area of the frame, roughly the top 25-30%')}
+${reservedZone('Main message zone', !!input.mainMessage, 'directly below the headline zone')}
+${reservedZone('Founder guarantee panel zone', !!(fm && input.guaranteeText), 'lower-middle area, above the CTA zone')}
+${reservedZone('Authenticity badge zone', !!input.badgeText, 'a small corner of the frame')}
+${reservedZone('Bottom CTA zone', !!input.ctaText, 'bottom area of the frame, roughly the bottom 12-15%')}
+This is a hard requirement: the final image must contain ZERO letters, words, or typography of any kind — not even a partial attempt. Every one of the zones above (where marked "used") must be visually clean, uncluttered negative space (soft gradient, blur, or simple background is fine) ready for real text to be composited on top afterward.`);
+  } else {
+    sections.push(`THAI TEXT
 ${textBlock('TOP HEADLINE', input.headline, 'เขียน headline สั้น กระแทกใจ อ่านจบใน 1-2 วินาที ต้องเชื่อมกับ Concept นี้โดยตรง', 'ตัวใหญ่สุดในภาพ น้ำหนักหนา อ่านง่ายแม้ย่อเป็น thumbnail')}
 
 ${textBlock('MAIN MESSAGE', input.mainMessage, 'สรุปประโยชน์หลักจากจุดเด่นที่ยืนยันได้เท่านั้น ห้ามแต่งสรรพคุณเพิ่ม', 'รองจาก headline ชัดเจนว่าเป็นข้อความสนับสนุน ไม่แย่งความสนใจจาก headline')}${
-    fm
-      ? `\n\n${textBlock('FOUNDER GUARANTEE PANEL', input.guaranteeText, `ข้อความรับรองสั้นๆ ในน้ำเสียงของ ${fm.name} เชื่อมกับความน่าเชื่อถือของแบรนด์ — ห้ามอ้างผลลัพธ์ที่ไม่มีหลักฐาน`, 'แยกเป็น panel/card ชัดเจน มีชื่อหรือลายเซ็นของผู้รับรองประกอบ')}`
-      : ''
-  }
+      fm
+        ? `\n\n${textBlock('FOUNDER GUARANTEE PANEL', input.guaranteeText, `ข้อความรับรองสั้นๆ ในน้ำเสียงของ ${fm.name} เชื่อมกับความน่าเชื่อถือของแบรนด์ — ห้ามอ้างผลลัพธ์ที่ไม่มีหลักฐาน`, 'แยกเป็น panel/card ชัดเจน มีชื่อหรือลายเซ็นของผู้รับรองประกอบ')}`
+        : ''
+    }
 
 ${textBlock('AUTHENTICITY BADGE', input.badgeText, input.registrationInfo ? `ใช้ข้อมูลอ้างอิง "${input.registrationInfo}" ในเชิงตรวจสอบได้ ไม่แต่งความหมายเกินจริง` : 'ไม่มีข้อมูลอ้างอิงยืนยัน — ข้ามส่วนนี้หรือใช้ trust badge ทั่วไปที่ไม่อ้างเลข/ใบรับรองที่ไม่มีจริง', 'ขนาดเล็กกว่า headline วางเป็น badge/seal graphic มุมภาพ')}
 
 ${textBlock('BOTTOM CTA', input.ctaText, 'ใช้ CTA ที่ชัดเจนตาม [TEXT STANDARD] เช่น "ดูรายละเอียดในตะกร้า" หรือ "กดสั่งซื้อเลย" ให้เหมาะกับ Channel', 'วางล่างสุดของภาพ ตัดกับพื้นหลังชัดเจน กดสายตาให้เห็นง่ายที่สุด')}`);
+  }
 
   sections.push(`TYPOGRAPHY
 ลำดับชั้นชัดเจน 4 ระดับ: Headline (ใหญ่สุด) → Main Message/Subheadline → Benefit/Supporting text → Footnote/CTA (เล็กสุด). ห้ามให้ทุกข้อความน้ำหนักเท่ากัน ต้องอ่านสแกนได้ภายใน 1-2 วินาทีบนมือถือ`);
+
+  // ZANA house graphic-layout pattern — explicit user request: pasted two of
+  // ZANA's own past banners as reference and asked "ใส่ Prompt ตามตัวอย่างนี้
+  // ให้ออกมาเป็นแบบภาพนี้ได้ไหม". Extracted the concrete, repeatable design
+  // DNA both examples share (2 circular icon-badges, a price/promo pill, a
+  // rounded-pill CTA button, a corner brand tag) instead of leaving it to
+  // vague adjectives like "professional/polished" — image models follow a
+  // named, concrete layout pattern far more reliably than abstract taste
+  // words. Skipped when the chosen Ad Visual Strategy's whole premise is
+  // "must not look like an ad" (Native Feed Camouflage / Fake Native Ads) —
+  // a pill CTA + brand tag + price badge would directly contradict those.
+  const skipAdTemplateLayout = input.adStrategy?.key === 'native_feed_camouflage' || input.adStrategy?.key === 'fake_native_ads';
+  if (!skipAdTemplateLayout) {
+    sections.push(`GRAPHIC LAYOUT PATTERN (ZANA house style)
+Feature badges: 2 small circular icon badges side by side in the lower third — a simple icon inside a solid-color filled circle, with a one-line Thai label directly under each icon.
+${
+  input.priceOrPromo
+    ? `Price/promo badge: a solid-color pill or rounded-rectangle badge showing "${input.priceOrPromo}" prominently — larger current price, smaller struck-through original price if both are given. Never invent a price that wasn't provided.`
+    : 'Price/promo badge: none — no price/promo text was provided, do not invent one.'
+}
+CTA button: a fully rounded pill-shaped filled-color button near the bottom${
+      textOverlayMode
+        ? ' — leave it EMPTY, no text inside (the CTA label is composited separately, see TEXT-SAFE ZONES above)'
+        : ' with the CTA text from THAI TEXT above, optionally a small icon before the text'
+    }.
+Brand mark: a small brand wordmark/logo tag in one top corner${input.brand ? ` — use the brand name "${input.brand}" exactly` : ' (no brand name was given — use a plain, unbranded corner tag, do not invent a brand name)'}.
+Frame split: the model or hero product occupies roughly half the frame (left or right), the remaining half carries the headline/badges — avoid a centered, cluttered composition.`);
+  }
 
   sections.push(`COMPOSITION
 Aspect ratio: ${ratioLabelForSize(input.aspectRatio)}

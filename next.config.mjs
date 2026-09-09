@@ -55,7 +55,12 @@ const nextConfig = {
     // for native-binary npm packages on Vercel: mark them "external" so
     // webpack doesn't try to bundle/tree-shake them at all, and Vercel copies
     // their entire package folder (binary included) into the function as-is.
-    serverComponentsExternalPackages: ['ffmpeg-static', 'ffprobe-static'],
+    // 'sharp' added for the new Thai text-overlay compositing feature
+    // (lib/media/text-overlay.tsx) — same reasoning as ffmpeg-static below:
+    // it ships prebuilt native .node binaries that webpack should not try to
+    // bundle/tree-shake. This is also literally Next.js's own documented
+    // recommendation for using sharp in a Route Handler.
+    serverComponentsExternalPackages: ['ffmpeg-static', 'ffprobe-static', 'sharp'],
     // Narrowed to only the 2 routes that actually call ffmpeg/ffprobe
     // (lib/media/ffmpeg.ts). The previous blanket '/api/**/*' entry forced
     // these large native binaries into EVERY API route's bundle — including
@@ -93,7 +98,15 @@ const nextConfig = {
       // repair. Same class of bug as the ffmpeg-static binary above.
       '/api/tools/editor/transcribe': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './node_modules/wordcut/**'],
       '/api/tools/editor/transcribe/route': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './node_modules/wordcut/**'],
-      '/api/tools/editor/transcribe/**/*': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './node_modules/wordcut/**']
+      '/api/tools/editor/transcribe/**/*': ['./node_modules/ffmpeg-static/**', './node_modules/ffprobe-static/**', './node_modules/wordcut/**'],
+      // Thai text-overlay compositing (lib/media/text-overlay.tsx) reads
+      // assets/fonts/Prompt-*.ttf via fs.readFileSync at runtime — same
+      // "file tracer can't follow a dynamic runtime fs path" issue already
+      // solved for the Editor tool's font files above, so this route needs
+      // the exact same explicit include.
+      '/api/tools/banner-generator/generate': ['./assets/fonts/**'],
+      '/api/tools/banner-generator/generate/route': ['./assets/fonts/**'],
+      '/api/tools/banner-generator/generate/**/*': ['./assets/fonts/**']
     }
   }
 };

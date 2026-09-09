@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { requireNonViewer } from '@/lib/auth/guards';
 
 export const runtime = 'nodejs';
 
@@ -12,6 +13,12 @@ export async function POST(request: Request, { params }: { params: { id: string 
     data: { user }
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  // Same root-cause fix as the other two model_presets routes — check role
+  // explicitly instead of letting a 'viewer' account's blocked INSERT
+  // surface as a raw "Cannot coerce the result to a single JSON object".
+  const access = await requireNonViewer(supabase, user.id);
+  if (!access.ok) return NextResponse.json({ error: access.message }, { status: 403 });
 
   const { data: source, error: fetchError } = await supabase.from('model_presets').select('*').eq('id', params.id).single();
   if (fetchError || !source) return NextResponse.json({ error: fetchError?.message || 'ไม่พบ Model Preset นี้' }, { status: 404 });

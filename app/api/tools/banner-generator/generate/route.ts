@@ -6,6 +6,7 @@ import { editImages, type ImageSize } from '@/lib/ai/image-gen';
 import { buildAnalysisMessages, buildConceptImagePrompt, findAdVisualStrategy, type FounderModelInfo, type ProductInfo } from '@/prompts/banner-generator';
 import { uploadEditedClip, resignEditedClip, signLibraryPaths, downloadLibraryImages } from '@/lib/supabase/storage';
 import { AIProviderError, callOpenAIVisionJSON } from '@/lib/ai/openai';
+import { renderTextOverlay, compositeTextOverlay, hasAnyOverlayText, type TextOverlaySpec } from '@/lib/media/text-overlay';
 
 // Real bug found via live user testing: reference photos used to be sent as
 // base64 data URLs inline in this route's JSON body. With MAX_REF_IMAGES=3
@@ -61,6 +62,7 @@ export const maxDuration = 120;
 // raw English "String must contain at most N character(s)".
 const productInfoShape = {
   product_name: z.string().min(1, 'กรุณาใส่ชื่อสินค้า').max(200, 'ชื่อสินค้ายาวเกินไป (สูงสุด 200 ตัวอักษร)'),
+  brand: z.string().max(100, 'ชื่อแบรนด์ยาวเกินไป (สูงสุด 100 ตัวอักษร)').optional(),
   category: z.string().max(200, 'ประเภทสินค้ายาวเกินไป (สูงสุด 200 ตัวอักษร)').optional(),
   selling_points: z.string().max(3000, 'จุดเด่นยาวเกินไป (สูงสุด 3000 ตัวอักษร) — ลองตัดข้อความที่ไม่จำเป็นออก').optional(),
   on_pack_text: z.string().max(1500, 'ข้อความบนแพ็กยาวเกินไป (สูงสุด 1500 ตัวอักษร)').optional(),
@@ -115,7 +117,16 @@ const generateSchema = z.object({
   versions_per_concept: z.number().int().min(1).max(3).default(1),
   size: z.enum(['1024x1024', '1024x1536', '1536x1024']).default('1024x1024'),
   // Storage path, not a data URL — same fix as reference_images above.
-  style_reference: z.string().optional()
+  style_reference: z.string().optional(),
+  // Real fix for a real, disclosed limitation — explicit user report:
+  // "รูปที่เจนได้มีปัญหาฟ้อนอ่านไม่ออก". When true, gpt-image-1 is told to
+  // leave clean empty zones instead of drawing the Thai copy itself, and
+  // this route composites the EXACT text (from headline/main_message/
+  // guarantee_text/badge_text/cta_text above) on top afterward as crisp,
+  // guaranteed-legible real typography — see lib/media/text-overlay.tsx.
+  // Defaults true (the recommended path); the user can still opt out per
+  // job if they specifically want the AI's own stylized lettering.
+  render_text_overlay: z.boolean().default(true)
 });
 
 const requestSchema = z.discriminatedUnion('mode', [analyzeSchema, generateSchema]);
@@ -123,6 +134,7 @@ const requestSchema = z.discriminatedUnion('mode', [analyzeSchema, generateSchem
 function toProductInfo(
   input: {
     product_name: string;
+    brand?: string;
     category?: string;
     selling_points?: string;
     on_pack_text?: string;
@@ -144,6 +156,7 @@ function toProductInfo(
 ): ProductInfo {
   return {
     productName: input.product_name,
+    brand: input.brand,
     category: input.category,
     sellingPoints: input.selling_points,
     onPackText: input.on_pack_text,
@@ -171,6 +184,7 @@ interface ConceptResult {
   created_at: string;
   signed_urls: string[];
   error?: string;
+  used_text_overlay?: boolean;
 }
 
 const analysisResultSchema = z.object({
@@ -325,6 +339,35 @@ export async function POST(request: Request) {
 
     const productInfo = toProductInfo(input, founderModel);
 
+    // Real fix for a real, disclosed limitation — explicit user report:
+    // "รูปที่เจนได้มีปัญหาฟ้อนอ่านไม่ออก" (Thai text on AI-generated banners is
+    // sometimes unreadable). Render the exact overlay text ONCE up front —
+    // same headline/CTA/etc apply to every concept and every version in this
+    // batch, so there's no reason to re-render it per image. If rendering
+    // itself fails for any reason (e.g. a font-file tracing issue in a given
+    // deploy), fall back to the old AI-drawn-text behavior instead of
+    // hard-failing the whole generation — a regression here should degrade
+    // gracefully, not break image generation entirely.
+    const overlaySpec: TextOverlaySpec = {
+      headline: input.headline,
+      mainMessage: input.main_message,
+      guarantee: input.guarantee_text,
+      badge: input.badge_text,
+      cta: input.cta_text
+    };
+    let useTextOverlay = input.render_text_overlay && hasAnyOverlayText(overlaySpec);
+    let overlayBuffer: Buffer | null = null;
+    if (useTextOverlay) {
+      try {
+        const [overlayW, overlayH] = input.size.split('x').map((n) => parseInt(n, 10));
+        overlayBuffer = await renderTextOverlay(overlaySpec, overlayW, overlayH);
+      } catch (overlayErr) {
+        console.error('Text overlay render failed, falling back to AI-drawn text:', overlayErr);
+        useTextOverlay = false;
+        overlayBuffer = null;
+      }
+    }
+
     // Downloads happen server-side from Storage (service-role) — the actual
     // image bytes never travel through this route's own request body.
     const productRefImages = await downloadLibraryImages(input.reference_images);
@@ -351,19 +394,30 @@ export async function POST(request: Request) {
     // must not wipe out the other 8 that succeeded.
     const settled = await Promise.allSettled(
       input.concepts.map(async (concept) => {
-        const prompt = buildConceptImagePrompt(productInfo, {
-          id: concept.id,
-          name: concept.name,
-          funnelStage: concept.funnel_stage,
-          description: concept.description
-        });
-        const buffers = await editImages({
+        const prompt = buildConceptImagePrompt(
+          productInfo,
+          {
+            id: concept.id,
+            name: concept.name,
+            funnelStage: concept.funnel_stage,
+            description: concept.description
+          },
+          { textOverlayMode: useTextOverlay }
+        );
+        const rawBuffers = await editImages({
           prompt,
           n: input.versions_per_concept,
           size: input.size as ImageSize,
           referenceImages: allReferenceImages,
           inputFidelity: 'high'
         });
+        // Composite the exact real Thai text on top of every version — same
+        // overlay buffer reused for all of them since the copy/size is
+        // identical across this whole batch.
+        const buffers =
+          useTextOverlay && overlayBuffer
+            ? await Promise.all(rawBuffers.map((buf) => compositeTextOverlay(buf, overlayBuffer as Buffer)))
+            : rawBuffers;
         const uploaded = await Promise.all(
           buffers.map((buf, i) => uploadEditedClip(buf, `banner_${randomUUID()}_${i}.png`, 'image/png'))
         );
@@ -388,7 +442,8 @@ export async function POST(request: Request) {
           concept_name: concept.name,
           job_id: insertError ? null : saved?.id ?? null,
           created_at: saved?.created_at ?? new Date().toISOString(),
-          signed_urls: uploaded.map((u) => u.signedUrl)
+          signed_urls: uploaded.map((u) => u.signedUrl),
+          used_text_overlay: useTextOverlay
         };
         return okResult;
       })

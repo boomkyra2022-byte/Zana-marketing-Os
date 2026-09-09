@@ -124,6 +124,7 @@ interface GenerateResultItem {
   created_at: string;
   signed_urls: string[];
   error?: string;
+  used_text_overlay?: boolean;
 }
 
 export default function BannerGeneratorClient({ history: initialHistory, products: initialProducts, knowledgeItems, models: modelOptions }: Props) {
@@ -166,6 +167,17 @@ export default function BannerGeneratorClient({ history: initialHistory, product
   const [guaranteeText, setGuaranteeText] = useState('');
   const [badgeText, setBadgeText] = useState('');
   const [ctaText, setCtaText] = useState('');
+
+  // Real fix for a real, disclosed limitation — explicit user report:
+  // "รูปที่เจนได้มีปัญหาฟ้อนอ่านไม่ออก" (Thai text on AI-generated banners is
+  // sometimes unreadable). When on, the server leaves clean empty zones and
+  // composites the EXACT text above as crisp real typography instead of
+  // asking gpt-image-1 to draw the letters itself — see
+  // lib/media/text-overlay.tsx. Defaults on (recommended); only matters for
+  // the real "สร้างภาพ" call, not the "Copy Prompt ไป GPT" export (there's no
+  // server-side compositing step available once it leaves this app, so that
+  // path always asks the AI to draw the text, unaffected by this toggle).
+  const [renderTextOverlay, setRenderTextOverlay] = useState(true);
 
   // Product/Knowledge Base picker — explicit user request: "อยากให้เพิ่มการนำ
   // Knowledge base หรือ Product สินค้าแสดงเป็นตัวเลือกเพื่อจะได้ไม่ต้องกรอกใหม่
@@ -295,6 +307,7 @@ export default function BannerGeneratorClient({ history: initialHistory, product
   function productInfoPayload() {
     return {
       product_name: productName.trim(),
+      brand: brand.trim() || undefined,
       category: category.trim() || undefined,
       selling_points: sellingPoints.trim() || undefined,
       on_pack_text: onPackText.trim() || undefined,
@@ -312,7 +325,8 @@ export default function BannerGeneratorClient({ history: initialHistory, product
       main_message: mainMessage.trim() || undefined,
       guarantee_text: guaranteeText.trim() || undefined,
       badge_text: badgeText.trim() || undefined,
-      cta_text: ctaText.trim() || undefined
+      cta_text: ctaText.trim() || undefined,
+      render_text_overlay: renderTextOverlay
     };
   }
 
@@ -327,6 +341,7 @@ export default function BannerGeneratorClient({ history: initialHistory, product
   function toProductInfoForPrompt(): ProductInfo {
     return {
       productName: productName.trim(),
+      brand: brand.trim() || undefined,
       category: category.trim() || undefined,
       sellingPoints: sellingPoints.trim() || undefined,
       onPackText: onPackText.trim() || undefined,
@@ -683,6 +698,13 @@ export default function BannerGeneratorClient({ history: initialHistory, product
             <label className="field-label">Bottom CTA</label>
             <input type="text" value={ctaText} onChange={(e) => setCtaText(e.target.value)} placeholder='เช่น "กดสั่งซื้อเลย"' />
           </div>
+          <label className="flex items-start gap-2 text-xs text-gray-600 pt-1">
+            <input type="checkbox" checked={renderTextOverlay} onChange={(e) => setRenderTextOverlay(e.target.checked)} className="mt-0.5" />
+            <span>
+              ซ้อนข้อความจริงหลังสร้างภาพ (แนะนำ) — ตัวอักษรจากช่องด้านบนจะคมชัดเสมอ เพราะระบบวาดตัวหนังสือเอง ไม่ให้ AI วาดตัวหนังสือ
+              (มีผลเฉพาะตอนกด &ldquo;สร้างภาพ&rdquo; จริง — ตอน Copy Prompt ไป GPT จะให้ AI วาดตัวหนังสือเองเหมือนเดิม เพราะซ้อนข้อความนอกระบบนี้ไม่ได้)
+            </span>
+          </label>
         </div>
 
         <div>
@@ -821,7 +843,10 @@ export default function BannerGeneratorClient({ history: initialHistory, product
           <label className="field-label">ผลลัพธ์ ({totalResultImages} ภาพ, {results.length} Concept)</label>
           {results.map((r) => (
             <div key={r.concept_id} className="space-y-2">
-              <p className="text-sm font-medium">#{r.concept_id} {r.concept_name}</p>
+              <p className="text-sm font-medium">
+                #{r.concept_id} {r.concept_name}{' '}
+                {r.used_text_overlay && <span className="text-xs font-normal text-accentGreen">✓ ข้อความคมชัด (ซ้อนข้อความจริง)</span>}
+              </p>
               {r.error ? (
                 <p className="text-xs text-red-600">✕ Concept นี้สร้างไม่สำเร็จ: {r.error}</p>
               ) : (
