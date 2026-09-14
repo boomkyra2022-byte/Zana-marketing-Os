@@ -51,6 +51,11 @@ body {
   font-size: 16px;
   line-height: 1.6;
   font-family: 'Sarabun', sans-serif;
+  /* Defensive guard: without this, any single element that's even a few px
+     too wide on a narrow screen creates page-level horizontal scroll,
+     which is exactly the class of bug fixed below (.app-shell). Cheap
+     insurance against the next one we haven't found yet. */
+  overflow-x: hidden;
 }
 
 h1, h2, h3, h4, .font-heading {
@@ -156,6 +161,31 @@ input[type='radio'] {
 .app-shell {
   display: flex;
   min-height: 100vh;
+}
+@media (max-width: 767px) {
+  /* REAL ROOT CAUSE of "mobile UI still broken" (user screenshot, page
+     content shifted/overlapping/scrolling horizontally on iPhone at
+     mktos.zanadynasty.com). `.app-shell` is `display:flex` with no
+     `flex-direction`, i.e. row. On desktop that's correct: sidebar (fixed
+     width, in-flow via position:sticky) sits left of main content.
+     On mobile, `.sidebar` switches to `position:fixed` (out of flow) via
+     the media query below — but `SideNav` also renders a SECOND, ordinary
+     in-flow element ahead of it: the "mobile top bar" (brand title + เมนู
+     button). With no flex-direction override, that top bar and `<main>`
+     (the dashboard/page content) ended up as two flex items in the SAME
+     ROW instead of stacked — the top bar took its natural content width
+     on the left, and all the page content got squeezed into a narrow
+     leftover column on the right, overflowing sideways off the viewport.
+     That's exactly the "content shifted right, top bar mid-screen,
+     Recent Creative/Action Queue still side-by-side" screenshot. Every
+     `sm:`/`md:`/`lg:` responsive class added elsewhere in this pass was
+     correct but powerless against this, since the whole content column
+     itself was never full-width to begin with. Forcing column direction
+     here — matching `.sidebar`'s own 767px breakpoint — stacks the top
+     bar above `<main>` like the component was always meant to render. */
+  .app-shell {
+    flex-direction: column;
+  }
 }
 .app-main {
   flex: 1;
