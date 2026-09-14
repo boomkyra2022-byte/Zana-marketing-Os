@@ -54,7 +54,7 @@ export function ProductForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <label className="field-label" htmlFor="selling_price">Selling Price</label>
           <input id="selling_price" name="selling_price" type="number" step="0.01" defaultValue={product?.selling_price ?? ''} />

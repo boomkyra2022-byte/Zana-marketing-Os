@@ -119,7 +119,7 @@ export default function TeamManagementClient({ members, currentUserId }: { membe
 
       <div className="card p-6 space-y-4">
         <h2 className="text-lg font-semibold">สร้าง Account พนักงานใหม่</h2>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="field-label">อีเมล *</label>
             <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="employee@email.com" />
@@ -159,8 +159,8 @@ export default function TeamManagementClient({ members, currentUserId }: { membe
         )}
       </div>
 
-      <div className="card overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="card overflow-hidden overflow-x-auto">
+        <table className="w-full text-sm min-w-[640px]">
           <thead className="bg-surface text-left text-gray-500">
             <tr>
               <th className="px-4 py-3">อีเมล</th>

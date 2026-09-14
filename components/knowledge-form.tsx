@@ -37,7 +37,7 @@ export function KnowledgeForm({
         <textarea id="content" name="content" rows={6} defaultValue={item?.content ?? ''} required />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <label className="field-label" htmlFor="tags">Tags (comma separated)</label>
           <input id="tags" name="tags" defaultValue={item?.tags?.length ? item.tags.join(', ') : ''} />

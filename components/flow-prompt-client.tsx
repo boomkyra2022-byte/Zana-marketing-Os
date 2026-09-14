@@ -234,7 +234,8 @@ export default function FlowPromptClient({ products, recentSets }: Props) {
         {recentSets.length === 0 ? (
           <p className="text-gray-500 text-sm">ยังไม่มีประวัติ</p>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[420px]">
             <thead className="bg-surface text-left text-gray-500">
               <tr>
                 <th className="px-2 py-2">Concept</th>
@@ -256,6 +257,7 @@ export default function FlowPromptClient({ products, recentSets }: Props) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

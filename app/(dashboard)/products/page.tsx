@@ -23,8 +23,8 @@ export default async function ProductsPage() {
       )}
 
       {(products?.length ?? 0) > 0 && (
-        <div className="card overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="card overflow-hidden overflow-x-auto">
+          <table className="w-full text-sm min-w-[720px]">
             <thead className="bg-surface text-left text-gray-500">
               <tr>
                 <th className="px-4 py-3">Brand</th>

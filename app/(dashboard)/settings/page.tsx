@@ -69,7 +69,7 @@ export default async function SettingsPage() {
 
       <form action={saveScoringSettings} className="card p-5 space-y-4">
         <h2 className="text-lg font-semibold">Creative Score Thresholds</h2>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="field-label">REJECT below</label>
             <input name="reject_below" type="number" defaultValue={scoring.reject_below ?? 60} />

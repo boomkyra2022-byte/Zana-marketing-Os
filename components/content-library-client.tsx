@@ -206,7 +206,8 @@ export default function ContentLibraryClient({ products, ideas, scripts, storybo
                   </div>
                 </div>
                 {isOpen && (
-                  <table className="w-full text-xs mt-3 overflow-x-auto">
+                  <div className="overflow-x-auto mt-3">
+                  <table className="w-full text-xs min-w-[560px]">
                     <thead className="bg-surface text-left text-gray-500">
                       <tr>
                         <th className="px-2 py-2">Scene</th>
@@ -228,6 +229,7 @@ export default function ContentLibraryClient({ products, ideas, scripts, storybo
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             );

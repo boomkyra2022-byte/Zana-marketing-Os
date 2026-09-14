@@ -204,8 +204,8 @@ export default async function DashboardPage() {
         </a>
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
-        <div className="card p-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="card p-5 overflow-x-auto">
           <h2 className="text-lg font-semibold mb-4">Recent Creative</h2>
           {(recentVideos.data?.length ?? 0) === 0 ? (
             <p className="text-gray-500">ยังไม่มีวิดีโอที่ analyze</p>

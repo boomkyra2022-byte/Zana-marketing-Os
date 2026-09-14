@@ -639,7 +639,7 @@ export default function FlowPromptDirectorClient({ products, personas, ideas, sc
 
             <div className="p-3 rounded-lg bg-surface border border-border">
               <div className="field-label mb-1">Hook ที่แนะนำ</div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <input
                   className="col-span-1"
                   value={analysis.recommended_hook.hook_type}
@@ -739,7 +739,8 @@ export default function FlowPromptDirectorClient({ products, personas, ideas, sc
 
                 <details className="text-xs text-gray-500">
                   <summary className="cursor-pointer select-none">รายละเอียด Scene ({part.scenes.length})</summary>
-                  <table className="w-full text-xs mt-2">
+                  <div className="overflow-x-auto">
+                  <table className="w-full text-xs mt-2 min-w-[480px]">
                     <thead className="bg-surface text-left">
                       <tr>
                         <th className="px-1.5 py-1">Time</th>
