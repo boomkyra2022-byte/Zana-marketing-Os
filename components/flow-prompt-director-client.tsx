@@ -764,6 +764,7 @@ export default function FlowPromptDirectorClient({ products, personas, ideas, sc
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </details>
               </div>
             ))}
