@@ -1,6 +1,6 @@
 # ZANA Marketing OS V2 — Handoff / Backup Summary
 
-**Backup วันที่:** 2026-09-14 — สร้างขึ้นเพื่อให้สั่งงานต่อในแชทใหม่ได้ทันที ถ้าแชทนี้หายหรือโดนลบ
+**Backup วันที่:** 2026-09-24 (อัปเดตล่าสุด) — สร้างขึ้นเพื่อให้สั่งงานต่อในแชทใหม่ได้ทันที ถ้าแชทนี้หายหรือโดนลบ
 
 **สำคัญ:** งานจริงทั้งหมด (โค้ด, migration, เอกสาร) ถูกบันทึกลงไฟล์ในโฟลเดอร์
 `E:\WEB\ZANA_Marketing_OS_V2_Claude_Cowork` อยู่แล้ว — **ไม่ได้อยู่แค่ในแชท** ต่อให้แชทนี้
@@ -24,7 +24,7 @@
 - **Repo:** `boomkyra2022-byte/Zana-marketing-Os` บน GitHub
 - **Deploy:** Vercel (แผน Hobby — จำกัด 12 Serverless Functions), โดเมนจริง `mktos.zanadynasty.com`
 - **โฟลเดอร์โปรเจกต์ในเครื่อง:** `E:\WEB\ZANA_Marketing_OS_V2_Claude_Cowork`
-- **บันทึกงานทั้งหมดแบบละเอียด:** `TODO.md` ในโฟลเดอร์เดียวกัน (ไฟล์ยาวมาก ~485 บรรทัด
+- **บันทึกงานทั้งหมดแบบละเอียด:** `TODO.md` ในโฟลเดอร์เดียวกัน (ไฟล์ยาวมาก ~500+ บรรทัด
   ไล่ตั้งแต่ Phase 1 จนถึงงานล่าสุด — เป็น source of truth ที่แท้จริงของทุกฟีเจอร์/บั๊กที่แก้ไปแล้ว)
 
 ## 2. กติกาตายตัวของโปรเจกต์ (ต้องยึดตลอด)
@@ -42,29 +42,33 @@
 
 ## 3. สถานะล่าสุด ณ วันที่ backup นี้
 
-**Deploy ล่าสุดที่ผู้ใช้ยืนยันว่าสำเร็จ:** batch ที่รวม —
-signup approval gate, RLS viewer-role fix บน Model Library, Visual Hook Banner
-`modelIdentity` cap fix (500→1500 ตัวอักษร), ระบบซ้อนข้อความไทยจริงบนภาพ (text-overlay
-compositing), ZANA house graphic-layout pattern, MASTER_VISUAL_QUALITY_BLOCK
-→ ผู้ใช้ตอบ **"ไม่ติดอะไรเลย Deploy สำเร็จ"**
+**Deploy ล่าสุดที่ผู้ใช้ยืนยันว่าสำเร็จ (2026-09-18):** mobile-responsive fix รอบ 2
+(`.app-shell` flex-direction) + unclosed `</div>` fix ใน `flow-prompt-director-client.tsx`
+→ ผู้ใช้ยืนยันในแชทถัดมาว่า **"ผ่านหมดแล้ว"** (build/push/deploy สำเร็จ) — ปิดประเด็นนี้แล้ว
+ไม่ต้องถามซ้ำ
 
-**งานล่าสุดที่ทำแล้ว:** Mobile-responsive pass ทั้งแอป (แก้ grid 3 คอลัมน์ที่ล็อกตายและ
-ตารางที่ไม่มี scroll แนวนอนใน 10 ไฟล์) — deploy ไปแล้ว แต่ผู้ใช้ส่ง screenshot จริงจากมือถือ
-กลับมาว่า **"ยังไม่ได้"** — หน้า Dashboard ยังเพี้ยน (เนื้อหาเลื่อนขวา/ล้นจอ/ซ้อนทับ)
+**งานล่าสุดที่ทำแล้ว (2026-09-24):** เริ่มโมดูลใหม่ **AI Video Prompt Studio** — ผู้ใช้ส่ง
+design doc เสนอ "CUSTOM VIDEO PROMPT ENGINE" แบบ dropdown-driven มาให้ ก่อนเขียนโค้ดได้เช็ค
+โค้ดจริงก่อนแล้วพบว่าทับซ้อนกับ Flow Prompt Director เดิมมาก จึงถามผู้ใช้ก่อนว่าจะอัปเกรดของเดิม
+หรือแยกโมดูลใหม่ — **ผู้ใช้เลือกแยกโมดูลใหม่ทั้งหมด, output เป็น text prompt ให้ copy อย่างเดียว
+(ไม่เรียก video-gen API), และให้เขียน spec ก่อนแล้วค่อยลงโค้ด** เขียน spec เป็น Claude Docs
+("ZANA AI Video Prompt Studio — Spec & Build Plan") แล้วเริ่ม **P0 (Prompt Compiler + Product
+Lock)** ตาม spec นั้นในเซสชันเดียวกัน — ไฟล์ที่เพิ่ม/แก้ทั้งหมดอยู่ใน `TODO.md` หัวข้อ
+"AI Video Prompt Studio — P0" (ล่าสุดในไฟล์)
 
-**เจอ root cause จริงแล้ว (ยังไม่ได้ deploy):** ปัญหาไม่ได้อยู่ที่ grid/table ที่แก้ไปก่อนหน้า
-เลย แต่อยู่ที่ `app/globals.css` — `.app-shell { display: flex; }` ไม่มี `flex-direction`
-(เป็น row) พอถึงจอมือถือ `SideNav` เรนเดอร์แถบบนสุด (แบรนด์ + ปุ่มเมนู) เป็น element ที่ยังอยู่ใน
-flow ปกติ วางเรียงข้าง `<main>` แบบแถวเดียวกันแทนที่จะซ้อนกันแนวตั้ง — เนื้อหาเพจทั้งหมดเลย
-ถูกบีบเข้าไปในคอลัมน์แคบๆ ด้านขวาแล้วล้นจอ ตรงกับ screenshot เป๊ะ **แก้แล้วด้วย
-`flex-direction: column` ภายใต้ breakpoint 767px เดียวกับ `.sidebar` บวก `overflow-x: hidden`
-บน body กันเผื่อ** — อยู่ใน `app/globals.css` ในเครื่องแล้ว **แต่ยังไม่ได้ push/deploy**
-นี่คือสิ่งแรกที่ต้องทำต่อในแชทใหม่: `git push` แล้วให้ผู้ใช้เช็คหน้า Dashboard บนมือถือจริงอีกครั้ง
+**⚠️ ยังไม่ได้รับการยืนยันว่า P0 build ผ่าน/deploy สำเร็จ** — **นี่คือสิ่งแรกที่ต้องถาม/ทำต่อใน
+แชทใหม่ถ้ายังไม่เคยถาม**: ถามผู้ใช้ว่า `npm run build` ผ่านหรือยัง (ไม่ต้อง `npm install` — ไม่มี
+dependency ใหม่), รัน migration `0023_video_prompt_studio.sql` ใน Supabase SQL Editor แล้วหรือยัง,
+push/deploy สำเร็จหรือยัง แล้วลองเข้าหน้า `/video-prompt-studio` จริงดูว่า wizard ทำงานได้ครบ
+8 step หรือไม่
 
 ## 4. รายการที่ต้องเช็ค/ทำต่อ (pending)
 
+0. **[ใหม่] ยืนยัน AI Video Prompt Studio P0** ว่า build/migration 0023/deploy สำเร็จ และเข้าหน้า
+   `/video-prompt-studio` ใช้งานได้จริงครบ 8 step (ดูรายละเอียดในหัวข้อ 3 ด้านบน) — ถามก่อนถ้ายังไม่เคยถาม
 1. **ยืนยัน mobile-responsive fixes** ว่า push/deploy สำเร็จ และเช็คบนมือถือจริงแล้ว
-   โดยเฉพาะหน้า Team Management, Products, Dashboard (Recent Creative panel)
+   โดยเฉพาะหน้า Team Management, Products, Dashboard (Recent Creative panel) — build/deploy ยืนยันผ่านแล้ว
+   (2026-09-18) เหลือแค่เช็คบนมือถือจริงถ้ายังไม่เคยเช็ค
 2. **ยืนยัน checklist ที่เคยให้ไว้** (อาจยังไม่ได้เช็คทุกข้อแม้ deploy จะสำเร็จ):
    - Visual Hook Banner สร้างไอเดียได้ไม่ขึ้น "Invalid request" อีก
    - Banner Generator ติ๊ก "ซ้อนข้อความจริง" แล้วภาพออกมาตัวหนังสือคมชัด
@@ -94,5 +98,6 @@ flow ปกติ วางเรียงข้าง `<main>` แบบแถ�
 
 ## 6. Migration ล่าสุดที่มีอยู่
 
-`0001` ถึง `0022` (`0022_signup_approval_gate.sql` เป็นล่าสุด) — ทุกไฟล์อยู่ใน
-`supabase/migrations/` รันผ่าน Supabase SQL Editor ด้วยตัวเองทั้งหมดตามลำดับเลข
+`0001` ถึง `0023` (`0023_video_prompt_studio.sql` เป็นล่าสุด — ยังไม่ยืนยันว่ารันใน Supabase
+SQL Editor แล้วหรือยัง) — ทุกไฟล์อยู่ใน `supabase/migrations/` รันผ่าน Supabase SQL Editor
+ด้วยตัวเองทั้งหมดตามลำดับเลข

@@ -27,7 +27,7 @@ export const NAV_SETTINGS: NavItem = { href: '/settings', label: 'Settings' };
 // Grouping logic (same reasoning as the Dashboard quadrants):
 // - Intelligence = context/insight sources (Knowledge Base, Winners/Learnings)
 // - Strategy = planning + reference data that feeds a creative plan
-//   (Creative Generator, Flow Prompt Director, Products, Personas)
+//   (Creative Generator, Flow Prompt Director, AI Video Prompt Studio, Products, Personas)
 // - Distribution = tools that produce a publishable asset (Editor, Voiceover)
 // - Analytics = tools that measure what already ran (Video Analyzer, Ads Automation)
 export const NAV_GROUPS: NavGroup[] = [
@@ -46,6 +46,11 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: '/creative-generator', label: 'Creative Generator' },
       { href: '/content-library', label: 'Content Library' },
       { href: '/flow-prompt', label: 'Flow Prompt Director' },
+      // New, standalone module — spec doc "ZANA AI Video Prompt Studio —
+      // Spec & Build Plan" (Claude Docs, 2026-09-24), P0. Deliberately a
+      // separate nav entry from Flow Prompt Director, not a replacement —
+      // explicit user decision when the two options were presented.
+      { href: '/video-prompt-studio', label: 'AI Video Prompt Studio' },
       { href: '/products', label: 'Products' },
       { href: '/models', label: 'Model Library' },
       { href: '/personas', label: 'Personas' }

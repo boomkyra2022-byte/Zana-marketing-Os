@@ -388,6 +388,44 @@ export interface GenerationLog {
 }
 
 // ============================================================
+// AI Video Prompt Studio (see supabase/migrations/0023_video_prompt_studio.sql)
+// New, standalone module — NOT part of Flow Prompt Director's flow_prompts
+// table (explicit user decision). `variables` mirrors
+// prompts/video-prompt-studio.ts's VideoPromptVariables shape but is kept
+// as `Record<string, any>` here since the DB never validates its inner
+// shape — the route's zod schema is the source of truth for what's valid.
+// ============================================================
+
+export interface VideoPromptProject {
+  id: string;
+  product_id: string | null;
+  model_preset_id: string | null;
+  creative_mode: string;
+  funnel_stage: string | null;
+  character_mode: string | null;
+  character_persona: string | null;
+  duration_sec: number | null;
+  scene_count: number | null;
+  pacing: string | null;
+  visual_quality: string | null;
+  variables: Record<string, any>;
+  compiled_prompt: string | null;
+  status: 'draft' | 'generated';
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VideoPromptPreset {
+  id: string;
+  name: string;
+  variables: Record<string, any>;
+  is_system_default: boolean;
+  created_by: string | null;
+  created_at: string;
+}
+
+// ============================================================
 // Ads Automation Bot — Phase 1 (see supabase/migrations/0014_ads_automation_phase1.sql)
 // ============================================================
 
