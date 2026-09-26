@@ -2,12 +2,62 @@
 // Keeps provider/model/timeout/error-handling consistent (MASTER_PROMPT_V2
 // "Security"/error-handling requirements: timeout + readable error on every AI call).
 
+import { createClient } from '@/lib/supabase/server';
+
 export class AIProviderError extends Error {
   status: number;
   constructor(message: string, status = 502) {
     super(message);
     this.status = status;
   }
+}
+
+// Settings → AI → "Model" used to be saved to the `settings` table but never
+// read by any AI call (every route fell through to AI_MODEL / gpt-4o-mini),
+// i.e. a dead field. User asked 2026-09-24 "ตั้งค่า Model ได้ไหม" — wired here
+// so every text/vision call picks it up. Precedence:
+//   explicit opts.model > Settings "Model" > env AI_MODEL > 'gpt-4o-mini'
+// Any failure reading settings (no session, RLS, network) silently falls back
+// to env/default — a settings read must never break an AI call.
+async function resolveChatModel(explicit?: string): Promise<string> {
+  if (explicit) return explicit;
+  try {
+    const supabase = createClient();
+    const { data } = await supabase.from('settings').select('value').eq('key', 'ai').maybeSingle();
+    const fromSettings = typeof (data?.value as any)?.model === 'string' ? String((data?.value as any).model).trim() : '';
+    if (fromSettings) return fromSettings;
+  } catch {
+    // fall through to env/default
+  }
+  return process.env.AI_MODEL || 'gpt-4o-mini';
+}
+
+// Some newer OpenAI models (reasoning models such as o-series / gpt-5 family)
+// reject a custom `temperature` with a 400. Every route here passes one, so if
+// the user picks such a model in Settings, retry once without temperature
+// instead of failing the whole feature.
+async function postChatCompletion(apiKey: string, body: Record<string, unknown>, timeoutMs: number): Promise<Response> {
+  const send = (payload: Record<string, unknown>) =>
+    fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+
+  const res = await send(body);
+  if (res.status === 400 && 'temperature' in body) {
+    const errText = await res.clone().text();
+    if (/temperature/i.test(errText)) {
+      const withoutTemperature: Record<string, unknown> = { ...body };
+      delete withoutTemperature.temperature;
+      return send(withoutTemperature);
+    }
+  }
+  return res;
 }
 
 export async function callOpenAIJSON(opts: {
@@ -21,17 +71,13 @@ export async function callOpenAIJSON(opts: {
   if (!apiKey) {
     throw new AIProviderError('OPENAI_API_KEY is not configured in .env.local', 500);
   }
-  const model = opts.model || process.env.AI_MODEL || 'gpt-4o-mini';
+  const model = await resolveChatModel(opts.model);
 
   let res: Response;
   try {
-    res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
+    res = await postChatCompletion(
+      apiKey,
+      {
         model,
         temperature: opts.temperature ?? 0.7,
         response_format: { type: 'json_object' },
@@ -39,9 +85,9 @@ export async function callOpenAIJSON(opts: {
           { role: 'system', content: opts.system },
           { role: 'user', content: opts.user }
         ]
-      }),
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 45000)
-    });
+      },
+      opts.timeoutMs ?? 45000
+    );
   } catch (err: any) {
     if (err?.name === 'TimeoutError') {
       throw new AIProviderError(`AI provider timed out after ${(opts.timeoutMs ?? 45000) / 1000}s`, 504);
@@ -78,7 +124,7 @@ export async function callOpenAIVisionJSON(opts: {
   if (!apiKey) {
     throw new AIProviderError('OPENAI_API_KEY is not configured in .env.local', 500);
   }
-  const model = opts.model || process.env.AI_MODEL || 'gpt-4o-mini';
+  const model = await resolveChatModel(opts.model);
 
   const content: any[] = [{ type: 'text', text: opts.user }];
   for (const image of opts.images) {
@@ -87,13 +133,9 @@ export async function callOpenAIVisionJSON(opts: {
 
   let res: Response;
   try {
-    res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
+    res = await postChatCompletion(
+      apiKey,
+      {
         model,
         temperature: opts.temperature ?? 0.3,
         response_format: { type: 'json_object' },
@@ -101,9 +143,9 @@ export async function callOpenAIVisionJSON(opts: {
           { role: 'system', content: opts.system },
           { role: 'user', content }
         ]
-      }),
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 180000)
-    });
+      },
+      opts.timeoutMs ?? 180000
+    );
   } catch (err: any) {
     if (err?.name === 'TimeoutError') {
       throw new AIProviderError(`AI provider timed out after ${(opts.timeoutMs ?? 180000) / 1000}s`, 504);

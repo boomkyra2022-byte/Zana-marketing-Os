@@ -52,6 +52,7 @@ export const NAV_GROUPS: NavGroup[] = [
       // explicit user decision when the two options were presented.
       { href: '/video-prompt-studio', label: 'AI Video Prompt Studio' },
       { href: '/products', label: 'Products' },
+      { href: '/pricing-calculator', label: 'คำนวณราคาขาย + กำไร' },
       { href: '/models', label: 'Model Library' },
       { href: '/personas', label: 'Personas' }
     ]

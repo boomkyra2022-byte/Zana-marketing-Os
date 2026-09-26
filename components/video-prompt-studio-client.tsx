@@ -35,6 +35,10 @@ const TEXT_FREQUENCIES = ['Hook only', 'Every 3 sec', 'Every Scene', 'Auto'];
 const VOICE_OPTIONS = ['No Voice', 'Thai Male', 'Thai Female', 'Custom'];
 const VOICE_STYLES = ['Casual', 'Creator', 'Energetic', 'Confident', 'Premium', 'Soft Luxury', 'Educational'];
 
+// Starting variables for a fresh wizard AND the base every preset is applied
+// on top of — so switching presets never carries fields over from the last one.
+const BASE_VARS: VideoPromptVariables = { duration_sec: 10, scene_count: 6 };
+
 const STEPS = [
   { id: 1, label: 'สินค้า' },
   { id: 2, label: 'Creative Mode' },
@@ -57,11 +61,17 @@ function FieldSelect({
   options: string[];
   onChange: (v: string) => void;
 }) {
+  // Seeded presets (migration 0023) use a few free-text values that aren't in
+  // the dropdown lists (e.g. "No Face / Hands Only", "Balanced Fast"). Without
+  // this, the <select> would silently show "ไม่ระบุ" even though the value IS
+  // set and IS sent to the compiler — the UI would lie about the state.
+  const isCustomValue = value !== '' && !options.includes(value);
   return (
     <div>
       <label className="field-label">{label}</label>
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">— ไม่ระบุ —</option>
+        {isCustomValue && <option value={value}>{value} (จาก Preset)</option>}
         {options.map((opt) => (
           <option key={opt} value={opt}>
             {opt}
@@ -84,7 +94,8 @@ export default function VideoPromptStudioClient({
   const [step, setStep] = useState(1);
   const [productId, setProductId] = useState('');
   const [modelPresetId, setModelPresetId] = useState('');
-  const [vars, setVars] = useState<VideoPromptVariables>({ duration_sec: 10, scene_count: 6 });
+  const [vars, setVars] = useState<VideoPromptVariables>(BASE_VARS);
+  const [activePresetId, setActivePresetId] = useState<string | null>(null);
   const [compiledPrompt, setCompiledPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -101,10 +112,21 @@ export default function VideoPromptStudioClient({
     setVars((prev) => ({ ...prev, [key]: value }));
   }
 
+  // Bug fix (user report 2026-09-24: "1-Click Preset ไม่สามารถจิ้มเลือกโหมดอื่นได้เลย"):
+  // 1) the highlight was tied to is_system_default, not to the clicked preset,
+  //    so clicking another preset looked like nothing happened;
+  // 2) the old Master Prompt stayed on screen after switching presets;
+  // 3) variables merged onto the previous preset's, so fields leaked between presets.
   function applyPreset(preset: VideoPromptPreset) {
-    setVars((prev) => ({ ...prev, ...preset.variables }));
+    setVars({ ...BASE_VARS, ...(preset.variables as VideoPromptVariables) });
+    setActivePresetId(preset.id);
+    setCompiledPrompt('');
+    setSavedMessage('');
+    setError('');
     setStep(8);
   }
+
+  const activePreset = presets.find((p) => p.id === activePresetId) ?? null;
 
   async function handleGenerate() {
     setLoading(true);
@@ -164,12 +186,23 @@ export default function VideoPromptStudioClient({
           <label className="field-label">1-Click Preset</label>
           <div className="flex flex-wrap gap-2">
             {presets.map((preset) => (
-              <button key={preset.id} type="button" onClick={() => applyPreset(preset)} className={preset.is_system_default ? 'btn-primary' : 'btn-secondary'}>
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => applyPreset(preset)}
+                aria-pressed={preset.id === activePresetId}
+                className={preset.id === activePresetId ? 'btn-primary' : 'btn-secondary'}
+              >
                 {preset.is_system_default ? '⭐ ' : ''}
                 {preset.name}
               </button>
             ))}
           </div>
+          <p className="text-xs text-gray-500 mt-2">
+            {activePreset
+              ? `ใช้ Preset "${activePreset.name}" อยู่ — กด Generate Master Prompt เพื่อสร้าง Prompt ใหม่ หรือย้อนไปปรับทีละ Step ได้`
+              : '⭐ = Hero Preset แนะนำสำหรับ ZANA — กดเลือก Preset เพื่อเติมตัวเลือกทุก Step ให้อัตโนมัติ'}
+          </p>
         </div>
       )}
 

@@ -26,14 +26,20 @@ export default async function SettingsPage() {
           <div>
             <label className="field-label">Model</label>
             <input name="model" defaultValue={ai.model ?? ''} placeholder="gpt-4o-mini" />
+            <p className="text-xs text-gray-500 mt-1">
+              ใช้กับทุกฟีเจอร์ที่ให้ AI เขียนข้อความหรือวิเคราะห์ภาพ (Creative Generator, Flow Prompt Director, Video Analyzer, Editor ฯลฯ) — เว้นว่าง = gpt-4o-mini ·
+              ต้องพิมพ์ชื่อรุ่น OpenAI ให้ถูกต้องและรองรับรูปภาพ ไม่งั้นฟีเจอร์ AI จะ error
+            </p>
           </div>
           <div>
             <label className="field-label">Temperature</label>
             <input name="temperature" type="number" step="0.1" min={0} max={2} defaultValue={ai.temperature ?? 0.7} />
+            <p className="text-xs text-amber-600 mt-1">⚠ ยังไม่มีผล — แต่ละฟีเจอร์ตั้ง temperature ของตัวเองไว้แล้ว</p>
           </div>
           <div>
             <label className="field-label">Transcription Model</label>
             <input name="transcription_model" defaultValue={ai.transcription_model ?? ''} placeholder="whisper-1" />
+            <p className="text-xs text-amber-600 mt-1">⚠ ยังไม่มีผล — ระบบถอดเสียงใช้รุ่นที่กำหนดในโค้ด</p>
           </div>
           <div>
             <label className="field-label">Max Ideas per generate</label>
