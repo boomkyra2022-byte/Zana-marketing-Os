@@ -961,6 +961,11 @@ export default function EditorClient({ products, recentJobs }: Props) {
                 ? `สร้าง Auto Shorts (${autoShortsNumClips} คลิป)`
                 : 'Run'}
         </button>
+        {!sourceUrl && (
+          <p className="text-xs text-red-600">
+            ⚠ ยังไม่มีวิดีโอต้นฉบับ — เลื่อนขึ้นไปวางลิงก์หรืออัปโหลดไฟล์ในช่อง &quot;Source Video&quot; ก่อน ปุ่มด้านบนจะกดไม่ได้จนกว่าจะมีไฟล์
+          </p>
+        )}
         {operation === 'PUNCHY_SRT' && burnIn && !liveCues && (
           <p className="text-xs text-gray-500">ต้องถอดเสียงใน Live Editor ด้านบนก่อน ถึงจะส่งออกวิดีโอได้</p>
         )}
