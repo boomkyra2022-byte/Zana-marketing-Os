@@ -525,3 +525,34 @@ User asked "ตั้งค่า Model ได้ไหม". Found the Settings 
 - Max Ideas/Scripts/Storyboards/Scenes/Frames/Duration + Prompt Version fields: not audited this round — unknown whether routes read them.
 - (history) At write time this was not build-tested — needed `npm run build`, running migration `0023_video_prompt_studio.sql` in Supabase SQL Editor, and redeploy before use. No new npm dependency added (reuses `zod`, existing Supabase/Next.js setup) — `npm install` is not required this round, only `npm run build`.
 - ⚠ **Known P0 scope gaps, disclosed honestly rather than silently deferred**: Auto Best Mode (P3, `recommendVideoPromptSetupPrompt`/`buildAutoBestModeMessages` exists but unwired), Custom Director per-scene override (P1), Skincare Engine's real dropdown UI (P2 — the compiler section exists but nothing in the wizard sets its inputs yet), Mode-specific Creative Score reweighting (P4), Save Prompt/Duplicate/Version History beyond the one `save` action (P5). All per the spec doc's own phased plan — none silently assumed done.
+
+## Auto Shorts — Editor tool, "วิดีโอยาว → AI ตัดเป็นคลิปสั้นแนวตั้งหลายคลิปพร้อมซับ" (2026-09-28, explicit user approval — "อนุมัติแนวทางนี้" after reviewing github.com/backblaze-b2-samples/ai-shorts-generator as a reference and being given a development-direction proposal)
+
+Concept only borrowed from the reference repo ("transcript → LLM picks N best moments → auto-cut+caption N clips") — no code copied, and neither of its two infra choices were brought over: its FastAPI/Python backend (would break this project's pure Next.js/Vercel-serverless architecture and risk re-triggering the Hobby-plan 12-function-limit problem from the Flow Prompt Director incident) or Backblaze B2 storage (redundant with the already-working Supabase `edited-clips` bucket). Folded into the EXISTING `POST /api/tools/editor/run` route as a new `operation` branch (not a new route file) for the same 12-function-limit reason.
+
+- [x] `supabase/migrations/0023_auto_shorts.sql` — additive: 7 new nullable columns on `editor_jobs` (`batch_id`, `clip_index`, `clip_start_sec`, `clip_end_sec`, `clip_title`, `clip_reason`, `clip_hook_score`) + index + widened `editor_jobs_operation_check` to add `'AUTO_SHORTS'`. **Not yet run on Supabase — must be run manually in the SQL Editor before this feature will work at all** (see deploy steps below).
+- [x] `prompts/auto-shorts.ts` — moment-detection prompt, same word-index-only grounding discipline as `prompts/punchy-subtitle.ts` (AI only ever picks index ranges from real Whisper timestamps, never invents times). Picks up to `num_clips` self-contained, hook-scored moments; explicitly told not to pad with weak picks if the video doesn't have enough good ones.
+- [x] `lib/media/ffmpeg.ts` → `trimAndCropVertical()` — ffmpeg `-ss/-to` after `-i` (frame-accurate) + centered `scale...crop` to 9:16. Disclosed limitation (in code + in the UI panel): this is a plain centered crop, NOT subject/face-tracking reframing — if the important part of the frame isn't centered, it can get cropped out.
+- [x] `lib/media/srt.ts` → `sliceWordsByRange()` (rebases a clip's words to its own 0-based timeline) + `groupWordsIntoCuesSimple()` (deterministic pause+word-count cue grouping, no AI call).
+- [x] `app/api/tools/editor/run/route.ts` — `AUTO_SHORTS` added to the operation enum + `num_clips` (1-5) field; new `runAutoShorts()` orchestrator (transcribe once → moment-detection AI call once → per clip: trim/crop → deterministic cue-grouping → burn captions → hand back to caller); POST handler branches early for `AUTO_SHORTS` into its own flow that inserts ONE `editor_jobs` row per finished clip (sharing a `batch_id`) as each clip completes, streaming `auto_shorts_stage` / `auto_shorts_clip_done` / `batch_done` NDJSON events — deliberately NOT the single-job-row flow every other operation uses, since Auto Shorts produces a variable number of results per run.
+  - **Design decision on captions**: per-clip captions use the new deterministic `groupWordsIntoCuesSimple()` (pause-length + word-count heuristic), NOT a second AI cue-grouping call per clip like PUNCHY_SRT does. Running AI per clip would multiply cost/latency by however many clips are requested and risk stacking on top of the moment-detection call within this route's 300s `maxDuration` ceiling. Quality tradeoff is disclosed in the UI, not hidden.
+- [x] `components/editor-client.tsx` — `AUTO_SHORTS` added to the operation selector; new settings panel (clip count slider 1-5, reused font/size/color/highlight/vertical-position/words-per-cue controls from the Punchy SRT style panel, honest limitation notices for the centered-crop and non-AI-caption tradeoffs); `handleRun()` now branches on the new NDJSON event types and accumulates clips into a live-updating results grid (one card per clip: 9:16 video preview, hook score badge, start/end time, AI-written title + reason, open/save link) that fills in as each clip finishes rather than waiting for the whole batch.
+- [ ] **Not yet build-tested or deployed.** `mcp__workspace__bash` remained unavailable this session (`HYPERVISOR_VIRT_DISABLED`), so `npm run build`/`tsc` could not be run from here — every new/edited file was manually re-read end-to-end after editing to check import correctness (matching this project's established `type`-keyword-for-type-imports convention under `isolatedModules`), function-signature matches against the real exports in `lib/media/ffmpeg.ts`/`lib/media/srt.ts`/`lib/media/ass.ts`, and JSX nesting/closure, but this is not a substitute for an actual compile — the user should run the real build before trusting this live.
+
+**Deploy steps (run in order):**
+1. Supabase SQL Editor → run `supabase/migrations/0023_auto_shorts.sql` in full (additive only, safe to run on the live DB).
+2. In PowerShell:
+   ```
+   cd E:\WEB\ZANA_Marketing_OS_V2_Claude_Cowork
+   npm run build
+   ```
+   Fix anything the build flags before proceeding.
+3. If the build succeeds:
+   ```
+   cd E:\WEB\ZANA_Marketing_OS_V2_Claude_Cowork
+   git add .
+   git commit -m "Add Auto Shorts mode to Editor tool"
+   git push
+   ```
+4. After Vercel finishes deploying, test live: Editor tool → เลือก "Auto Shorts" → วางลิงก์/อัปโหลดวิดีโอที่มีความยาวพอสมควร (แนะนำ 2-10 นาที เพื่อไม่ชนขีดจำกัด 300 วินาทีของการรันทั้งชุด) → ตั้งจำนวนคลิป → กด "สร้าง Auto Shorts" → ยืนยันว่าคลิปที่ได้ครอปเป็นแนวตั้งจริง มีซับเบิร์นลงจริง และหัวข้อ/เหตุผล/hook score ที่ AI ให้มาสมเหตุสมผลกับเนื้อหาจริงในคลิปนั้น.
+5. ⚠ ถ้าวิดีโอต้นฉบับยาวมาก (transcript ยาวเกิน ~6000 คำ) prompt จะตัดท้าย transcript ทิ้งและ AI จะเลือกได้แค่จากส่วนที่ตัดมา — เป็น known limitation ที่เปิดเผยไว้ใน prompt เอง ไม่ใช่ silent failure แต่ผู้ใช้ควรรู้ก่อนทดสอบกับคลิปยาวมากๆ

@@ -49,7 +49,7 @@ interface Props {
 // limits. RENDER, SUBTITLE_SRT (Tamsub) and DEWATERMARK (Tamsub) removed;
 // PUNCHY_SRT (burn-in on/off) already covers Render + SRT-only, and
 // DEWATERMARK_LOCAL already covers dewatermark, using our own pipeline.
-type Operation = 'SILENCE_CUT' | 'PUNCHY_SRT' | 'DEWATERMARK_LOCAL';
+type Operation = 'SILENCE_CUT' | 'PUNCHY_SRT' | 'DEWATERMARK_LOCAL' | 'AUTO_SHORTS';
 
 const OPERATIONS: { value: Operation; label: string; billing: string }[] = [
   { value: 'SILENCE_CUT', label: 'ตัดช่วงเงียบ (Silence-cut)', billing: 'ประมวลผลในเซิร์ฟเวอร์เราเอง ไม่มีค่าใช้จ่ายเพิ่ม ไม่มี rate limit' },
@@ -62,8 +62,20 @@ const OPERATIONS: { value: Operation; label: string; billing: string }[] = [
     value: 'DEWATERMARK_LOCAL',
     label: 'ลบลายน้ำ (เบลอมุม)',
     billing: 'ประมวลผลในเซิร์ฟเวอร์เราเอง ไม่มีค่าใช้จ่ายเพิ่ม ไม่มี rate limit'
+  },
+  {
+    value: 'AUTO_SHORTS',
+    label: 'Auto Shorts — AI เลือกช่วงเด็ดจากคลิปยาว ตัดเป็นคลิปสั้นแนวตั้งหลายคลิปพร้อมซับ',
+    billing: 'ใช้ OpenAI (transcribe + เลือกช่วง) + ffmpeg ของเราเอง — ไม่มีค่าใช้จ่ายเพิ่ม ไม่มี rate limit'
   }
 ];
+
+const AUTO_SHORTS_STAGE_LABELS: Record<string, string> = {
+  transcribing: 'กำลังถอดเสียงวิดีโอทั้งคลิป...',
+  detecting_moments: 'AI กำลังเลือกช่วงที่น่าสนใจที่สุด...',
+  rendering_clip: 'กำลังตัด+แต่งคลิป',
+  clip_done: 'ตัดคลิปเสร็จ'
+};
 
 const WATERMARK_CORNERS: { value: string; label: string }[] = [
   { value: 'bottom-right', label: 'ล่างขวา' },
@@ -200,6 +212,18 @@ export default function EditorClient({ products, recentJobs }: Props) {
   const [result, setResult] = useState<{ kind: 'VIDEO' | 'SRT'; signed_url?: string; srt_text?: string } | null>(null);
   const [videoDownloadState, setVideoDownloadState] = useState<'idle' | 'preparing' | 'error'>('idle');
 
+  // Auto Shorts state — "long video -> AI picks best moments -> N vertical
+  // clips" (approved dev direction after reviewing github.com/backblaze-
+  // b2-samples/ai-shorts-generator as a reference). Always burns captions
+  // (reuses the same font/size/color/highlight/vertical-position/words-per-
+  // cue state already declared above for PUNCHY_SRT), so no separate style
+  // state is needed here — only the clip count and the streamed results.
+  const [autoShortsNumClips, setAutoShortsNumClips] = useState(3);
+  const [autoShortsStage, setAutoShortsStage] = useState('');
+  const [autoShortsClips, setAutoShortsClips] = useState<
+    { clipIndex: number; startSec: number; endSec: number; title: string; reason: string; hookScore: number; signedUrl: string }[]
+  >([]);
+
   const selected = OPERATIONS.find((o) => o.value === operation)!;
 
   async function handleRun() {
@@ -207,6 +231,10 @@ export default function EditorClient({ products, recentJobs }: Props) {
     setErrorMsg('');
     setResult(null);
     setProgressStatus('กำลังเริ่มต้น...');
+    if (operation === 'AUTO_SHORTS') {
+      setAutoShortsClips([]);
+      setAutoShortsStage('');
+    }
 
     try {
       const res = await fetch('/api/tools/editor/run', {
@@ -222,12 +250,14 @@ export default function EditorClient({ products, recentJobs }: Props) {
           watermark_corner: watermarkCorner || undefined,
           watermark_size: watermarkSize || undefined,
           burn_in: operation === 'PUNCHY_SRT' ? burnIn : undefined,
-          font_name: operation === 'PUNCHY_SRT' && burnIn ? fontName : undefined,
-          font_size_px: operation === 'PUNCHY_SRT' && burnIn ? fontSizePx : undefined,
-          max_words_per_cue: operation === 'PUNCHY_SRT' ? maxWordsPerCue : undefined,
-          text_color: operation === 'PUNCHY_SRT' && burnIn ? textColor : undefined,
-          highlight_color: operation === 'PUNCHY_SRT' && burnIn ? highlightColor : undefined,
-          vertical_position_pct: operation === 'PUNCHY_SRT' && burnIn ? verticalPositionPct : undefined,
+          font_name: operation === 'PUNCHY_SRT' && burnIn ? fontName : operation === 'AUTO_SHORTS' ? fontName : undefined,
+          font_size_px: operation === 'PUNCHY_SRT' && burnIn ? fontSizePx : operation === 'AUTO_SHORTS' ? fontSizePx : undefined,
+          max_words_per_cue: operation === 'PUNCHY_SRT' || operation === 'AUTO_SHORTS' ? maxWordsPerCue : undefined,
+          text_color: operation === 'PUNCHY_SRT' && burnIn ? textColor : operation === 'AUTO_SHORTS' ? textColor : undefined,
+          highlight_color: operation === 'PUNCHY_SRT' && burnIn ? highlightColor : operation === 'AUTO_SHORTS' ? highlightColor : undefined,
+          vertical_position_pct:
+            operation === 'PUNCHY_SRT' && burnIn ? verticalPositionPct : operation === 'AUTO_SHORTS' ? verticalPositionPct : undefined,
+          num_clips: operation === 'AUTO_SHORTS' ? autoShortsNumClips : undefined,
           // Live Editor cues (from /api/tools/editor/transcribe, possibly
           // drag/retype-edited by the user) — when present the server burns
           // these verbatim instead of re-transcribing from scratch, so
@@ -257,6 +287,31 @@ export default function EditorClient({ products, recentJobs }: Props) {
           const event = JSON.parse(line);
           if (event.type === 'status') {
             setProgressStatus(STATUS_LABELS[event.status] ?? event.status);
+          } else if (event.type === 'auto_shorts_stage') {
+            const label = AUTO_SHORTS_STAGE_LABELS[event.stage] ?? event.stage;
+            setAutoShortsStage(
+              event.stage === 'rendering_clip' && typeof event.clip_index === 'number'
+                ? `${label} #${event.clip_index + 1}${event.title ? ` — ${event.title}` : ''}`
+                : label
+            );
+          } else if (event.type === 'auto_shorts_clip_done') {
+            setAutoShortsClips((prev) =>
+              [
+                ...prev,
+                {
+                  clipIndex: event.clip.clip_index,
+                  startSec: event.clip.start_sec,
+                  endSec: event.clip.end_sec,
+                  title: event.clip.title,
+                  reason: event.clip.reason,
+                  hookScore: event.clip.hook_score,
+                  signedUrl: event.result.signed_url
+                }
+              ].sort((a, b) => a.clipIndex - b.clipIndex)
+            );
+          } else if (event.type === 'batch_done') {
+            setPhase('done');
+            setAutoShortsStage('');
           } else if (event.type === 'done') {
             setResult(event.result);
             setPhase('done');
@@ -596,6 +651,124 @@ export default function EditorClient({ products, recentJobs }: Props) {
           )}
         </div>
 
+        {operation === 'AUTO_SHORTS' && (
+          <div className="card p-4 bg-surface space-y-4">
+            <h3 className="font-semibold text-sm">Auto Shorts — ตั้งค่า</h3>
+
+            <div>
+              <label className="field-label">จำนวนคลิปสั้นที่ต้องการ</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={1}
+                  max={5}
+                  step={1}
+                  value={autoShortsNumClips}
+                  onChange={(e) => setAutoShortsNumClips(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <span className="text-sm w-6 text-right">{autoShortsNumClips}</span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                AI จะเลือกช่วงที่น่าสนใจที่สุดจากวิดีโอต้นฉบับ — ถ้าวิดีโอมีช่วงเด็ดไม่ครบตามจำนวนที่ตั้งไว้ ระบบจะคืนคลิปเท่าที่หาได้จริง ไม่ยัดช่วงอ่อนเข้ามา
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="field-label">ฟอนต์ซับ</label>
+                <select value={fontName} onChange={(e) => setFontName(e.target.value)}>
+                  {FONT_OPTIONS.map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="field-label">ขนาดตัวอักษร (px)</label>
+                <div className="flex items-center gap-3">
+                  <input type="range" min={16} max={160} step={2} value={fontSizePx} onChange={(e) => setFontSizePx(Number(e.target.value))} className="flex-1" />
+                  <span className="text-sm w-10 text-right">{fontSizePx}px</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="field-label">จำนวนคำต่อบรรทัดซับ</label>
+                <div className="flex items-center gap-3">
+                  <input type="range" min={2} max={10} step={1} value={maxWordsPerCue} onChange={(e) => setMaxWordsPerCue(Number(e.target.value))} className="flex-1" />
+                  <span className="text-sm w-6 text-right">{maxWordsPerCue}</span>
+                </div>
+              </div>
+              <div>
+                <label className="field-label">ตำแหน่งแนวตั้ง (% จากด้านบน)</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={10}
+                    max={95}
+                    step={1}
+                    value={verticalPositionPct}
+                    onChange={(e) => setVerticalPositionPct(Number(e.target.value))}
+                    className="flex-1"
+                  />
+                  <span className="text-sm w-12 text-right">{verticalPositionPct}%</span>
+                </div>
+              </div>
+            </div>
+
+            <link rel="stylesheet" href={GOOGLE_FONTS_HREF} />
+            <div className="rounded-lg p-4 flex items-center justify-center bg-navy" style={{ minHeight: 80 }}>
+              <span style={{ fontFamily: fontName, fontSize: Math.min(fontSizePx, 48), color: textColor }}>
+                ก ข ค ง สวัสดี <span style={{ color: highlightColor }}>AaBbCc</span> 123
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="field-label">สีตัวอักษร</label>
+                <div className="flex gap-1.5 flex-wrap items-center">
+                  {TEXT_COLOR_SWATCHES.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setTextColor(c)}
+                      className="w-6 h-6 rounded-full border-2"
+                      style={{ background: c, borderColor: textColor === c ? '#2563eb' : 'transparent' }}
+                      aria-label={c}
+                    />
+                  ))}
+                  <input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} className="!w-8 !h-8 !p-0" />
+                </div>
+              </div>
+              <div>
+                <label className="field-label">สี Highlight (คำที่กำลังพูด)</label>
+                <div className="flex gap-1.5 flex-wrap items-center">
+                  {HIGHLIGHT_COLOR_SWATCHES.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setHighlightColor(c)}
+                      className="w-6 h-6 rounded-full border-2"
+                      style={{ background: c, borderColor: highlightColor === c ? '#2563eb' : 'transparent' }}
+                      aria-label={c}
+                    />
+                  ))}
+                  <input type="color" value={highlightColor} onChange={(e) => setHighlightColor(e.target.value)} className="!w-8 !h-8 !p-0" />
+                </div>
+              </div>
+            </div>
+
+            <div className="text-xs text-gray-500 bg-white rounded-lg p-3 border border-border space-y-1">
+              <p>⚠ ครอปเป็นแนวตั้ง 9:16 แบบกึ่งกลางเฟรมเท่านั้น — ไม่ใช่ AI ตามใบหน้า/ตัวแบบอัตโนมัติ ถ้าจุดสำคัญของภาพไม่อยู่กลางเฟรม อาจถูกครอปตกขอบ</p>
+              <p>⚠ ซับในแต่ละคลิปแบ่งบรรทัดด้วยกฎช่วงเงียบ+จำนวนคำ (ไม่ใช้ AI ต่อคลิป) เพื่อคุมเวลาไม่ให้เกิน 300 วินาทีต่อการรันทั้งชุด</p>
+              <p>⚠ ฟอนต์ที่เลือกต้องมีไฟล์ .ttf วางไว้ในเซิร์ฟเวอร์ก่อนถึงจะเผาได้จริง (ดู <code>assets/fonts/README.md</code>)</p>
+            </div>
+          </div>
+        )}
+
         {operation === 'PUNCHY_SRT' && (
           <div className="card p-4 bg-surface space-y-4">
             <div className="flex items-center justify-between">
@@ -773,7 +946,13 @@ export default function EditorClient({ products, recentJobs }: Props) {
           disabled={!sourceUrl || phase === 'running' || (operation === 'PUNCHY_SRT' && burnIn && !liveCues)}
           onClick={handleRun}
         >
-          {phase === 'running' ? 'กำลังประมวลผล...' : operation === 'PUNCHY_SRT' && burnIn ? 'ส่งออกวิดีโอ (เผาซับ)' : 'Run'}
+          {phase === 'running'
+            ? 'กำลังประมวลผล...'
+            : operation === 'PUNCHY_SRT' && burnIn
+              ? 'ส่งออกวิดีโอ (เผาซับ)'
+              : operation === 'AUTO_SHORTS'
+                ? `สร้าง Auto Shorts (${autoShortsNumClips} คลิป)`
+                : 'Run'}
         </button>
         {operation === 'PUNCHY_SRT' && burnIn && !liveCues && (
           <p className="text-xs text-gray-500">ต้องถอดเสียงใน Live Editor ด้านบนก่อน ถึงจะส่งออกวิดีโอได้</p>
@@ -782,11 +961,43 @@ export default function EditorClient({ products, recentJobs }: Props) {
         {phase === 'running' && (
           <div className="card p-4 bg-surface text-sm flex items-center gap-3">
             <span className="inline-block w-2 h-2 rounded-full bg-accentBlue animate-pulse" />
-            {progressStatus}
+            {operation === 'AUTO_SHORTS' && autoShortsStage ? autoShortsStage : progressStatus}
           </div>
+        )}
+        {operation === 'AUTO_SHORTS' && autoShortsClips.length > 0 && phase === 'running' && (
+          <p className="text-xs text-gray-500">ตัดเสร็จแล้ว {autoShortsClips.length} คลิป — กำลังตัดคลิปต่อไป...</p>
         )}
         {phase === 'error' && <div className="text-red-600 text-sm">{errorMsg}</div>}
       </div>
+
+      {operation === 'AUTO_SHORTS' && autoShortsClips.length > 0 && (
+        <div className="card p-6 space-y-4">
+          <h3 className="font-semibold">
+            ผลลัพธ์ — {autoShortsClips.length} คลิป{phase === 'running' ? ' (กำลังทำต่อ...)' : ''}
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {autoShortsClips.map((clip) => (
+              <div key={clip.clipIndex} className="card p-3 space-y-2">
+                <video src={clip.signedUrl} controls className="w-full rounded-lg aspect-[9/16] object-cover bg-navy" />
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-accentGreen/10 text-accentGreen border border-accentGreen/30">
+                    Hook {clip.hookScore}/10
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {clip.startSec.toFixed(0)}s–{clip.endSec.toFixed(0)}s
+                  </span>
+                </div>
+                <p className="text-sm font-semibold">{clip.title}</p>
+                <p className="text-xs text-gray-500">{clip.reason}</p>
+                <a href={clip.signedUrl} target="_blank" rel="noreferrer" className="btn-secondary w-full text-center text-xs">
+                  เปิด / บันทึกวิดีโอ
+                </a>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500">ลิงก์ดาวน์โหลดนี้หมดอายุใน 24 ชั่วโมง — ดูประวัติงานด้านล่างเพื่อขอลิงก์ใหม่ภายหลัง</p>
+        </div>
+      )}
 
       {phase === 'done' && result?.kind === 'VIDEO' && result.signed_url && (
         <div className="card p-6 space-y-3">

@@ -190,6 +190,45 @@ function formatSrtTimestamp(seconds: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)},${pad(ms, 3)}`;
 }
 
+// Added for Auto Shorts (Editor tool): once a clip's [start,end] window is
+// picked from the full-video transcript, this slices out just the words
+// that fall inside it and rebases their timestamps to 0 — needed because
+// the clip gets ffmpeg-trimmed to its own standalone file, whose internal
+// timeline restarts at 0 regardless of where it sat in the source video.
+// Words only partially inside the window (start before, end after) are
+// still included in full rather than clipped mid-word, since burning a
+// caption for a word that's half-audible is worse than a caption that runs
+// very slightly past the visible clip boundary.
+export function sliceWordsByRange(words: TimedWord[], startSec: number, endSec: number): TimedWord[] {
+  return words
+    .filter((w) => w.end > startSec && w.start < endSec)
+    .map((w) => ({ word: w.word, start: Math.max(0, w.start - startSec), end: Math.max(0, w.end - startSec) }));
+}
+
+// Deterministic (no AI call) cue grouping for Auto Shorts — each generated
+// short clip would otherwise need its own AI cue-grouping call just to burn
+// captions (like PUNCHY_SRT does), multiplying cost/latency by however many
+// clips a batch produces and risking the Editor route's 300s timeout on top
+// of the moment-detection call it already makes. A pause-based heuristic
+// (new cue on a natural silence gap, or once maxWordsPerCue is hit) is the
+// standard approach most non-AI auto-caption tools use and is more than
+// good enough quality for short clips that are already pre-trimmed to a
+// single coherent moment.
+export function groupWordsIntoCuesSimple(words: TimedWord[], maxWordsPerCue = 5, pauseGapSec = 0.35): RawCue[] {
+  const cues: RawCue[] = [];
+  let cueStart = 0;
+  for (let i = 1; i <= words.length; i++) {
+    const atEnd = i === words.length;
+    const gapTooLong = !atEnd && words[i].start - words[i - 1].end > pauseGapSec;
+    const cueLenReached = i - cueStart >= maxWordsPerCue;
+    if (atEnd || gapTooLong || cueLenReached) {
+      if (i - 1 >= cueStart) cues.push({ start_word_index: cueStart, end_word_index: i - 1 });
+      cueStart = i;
+    }
+  }
+  return cues;
+}
+
 // Plain-text SRT, no HTML/color/effect tags — CapCut and every other editor
 // reads this cleanly.
 export function cuesToSrt(cues: TimedCue[]): string {

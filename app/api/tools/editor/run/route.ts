@@ -15,6 +15,7 @@ import {
   detectSilence,
   computeKeepSegments,
   cutSilenceSegments,
+  trimAndCropVertical,
   MediaProcessingError,
   type WatermarkCorner
 } from '@/lib/media/ffmpeg';
@@ -27,7 +28,17 @@ import { uploadEditedClip } from '@/lib/supabase/storage';
 import { type TamsubResult } from '@/lib/tamsub/client';
 import { transcribeAudioWithTimestamps, callOpenAIJSON, AIProviderError } from '@/lib/ai/openai';
 import { buildPunchySubtitlePrompt, PROMPT_VERSION_PUNCHY_SUBTITLE } from '@/prompts/punchy-subtitle';
-import { repairCueCoverage, resolveCueTimestamps, resolveCueTimestampsWithWords, cuesToSrt, type RawCue, type TimedCueWithWords } from '@/lib/media/srt';
+import { buildAutoShortsPrompt } from '@/prompts/auto-shorts';
+import {
+  repairCueCoverage,
+  resolveCueTimestamps,
+  resolveCueTimestampsWithWords,
+  cuesToSrt,
+  sliceWordsByRange,
+  groupWordsIntoCuesSimple,
+  type RawCue,
+  type TimedCueWithWords
+} from '@/lib/media/srt';
 import { buildKaraokeAss } from '@/lib/media/ass';
 import { regroupWhisperWordsThai } from '@/lib/media/word-segment';
 
@@ -52,9 +63,17 @@ export const maxDuration = 300;
 const MAX_BYTES_DEFAULT = 50 * 1024 * 1024;
 
 const requestSchema = z.object({
-  operation: z.enum(['SILENCE_CUT', 'PUNCHY_SRT', 'DEWATERMARK_LOCAL']),
+  operation: z.enum(['SILENCE_CUT', 'PUNCHY_SRT', 'DEWATERMARK_LOCAL', 'AUTO_SHORTS']),
   source_url: z.string().min(1),
   product_id: z.string().uuid().nullable().optional(),
+  // AUTO_SHORTS — "long video -> AI picks best moments -> N vertical clips"
+  // (see prompts/auto-shorts.ts). Reuses the existing burn_in style fields
+  // above (font_name/font_size_px/text_color/highlight_color/
+  // vertical_position_pct/max_words_per_cue) for each clip's captions —
+  // captions are always burned in for Auto Shorts (no plain-SRT mode),
+  // grouped deterministically per clip (see groupWordsIntoCuesSimple) rather
+  // than via a second AI call per clip.
+  num_clips: z.number().int().min(1).max(5).optional(),
   // SILENCE_CUT — own ffmpeg silencedetect+cut engine now (see
   // lib/media/ffmpeg.ts). threshold_db is a NEGATIVE dB value (native
   // ffmpeg units, not Tamsub's old % scale); min_silence_sec/bridge_sec are
@@ -117,6 +136,167 @@ const punchyCuesSchema = z.object({
     )
     .optional()
 });
+
+const autoShortsMomentsSchema = z.object({
+  clips: z.array(
+    z.object({
+      start_word_index: z.number().int().min(0),
+      end_word_index: z.number().int().min(0),
+      title: z.string().min(1),
+      reason: z.string().min(1),
+      hook_score: z.number().min(1).max(10)
+    })
+  )
+});
+
+interface AutoShortsClipResult {
+  clipIndex: number;
+  startSec: number;
+  endSec: number;
+  title: string;
+  reason: string;
+  hookScore: number;
+  buffer: Buffer;
+  contentType: string;
+}
+
+interface AutoShortsStyleOptions {
+  fontName?: string;
+  fontSizePx?: number;
+  maxWordsPerCue: number;
+  textColorHex?: string;
+  highlightColorHex?: string;
+  verticalPositionPct?: number;
+}
+
+// "Long video -> AI picks the N best moments -> N vertical clips, captioned"
+// — approved direction after reviewing github.com/backblaze-b2-samples/
+// ai-shorts-generator as a reference (see prompts/auto-shorts.ts header).
+// Transcribes + runs moment-detection ONCE against the full video, then
+// trims/crops/captions each picked moment. Per-clip captions are grouped
+// deterministically (groupWordsIntoCuesSimple, no AI call) — running the
+// existing AI cue-grouping per clip would multiply cost/latency by however
+// many clips are requested and risk this route's 300s ceiling on top of the
+// moment-detection call already made.
+// onClipReady is called once per finished clip so the caller (POST handler)
+// can upload + persist + stream progress incrementally instead of waiting
+// for the whole batch to finish before the user sees anything.
+async function runAutoShorts(
+  sourcePath: string,
+  runId: string,
+  tmpDir: string,
+  productId: string | null,
+  supabase: ReturnType<typeof createClient>,
+  numClips: number,
+  style: AutoShortsStyleOptions,
+  onClipReady: (clip: AutoShortsClipResult) => Promise<void>,
+  onProgress: (event: Record<string, unknown>) => void
+): Promise<void> {
+  const audioPath = path.join(tmpDir, `editor_${runId}_autoshorts_audio.mp3`);
+  const perClipCleanup: string[] = [];
+  try {
+    const metadata = await probeMetadata(sourcePath);
+    await extractAudio(sourcePath, audioPath);
+    const audioBuffer = fs.readFileSync(audioPath);
+
+    onProgress({ type: 'auto_shorts_stage', stage: 'transcribing' });
+    const { words: rawWords } = await transcribeAudioWithTimestamps({ fileBuffer: audioBuffer, filename: 'audio.mp3' });
+    const words = await regroupWhisperWordsThai(rawWords);
+
+    let productName: string | null = null;
+    let brand: string | null = null;
+    if (productId) {
+      const { data: product } = await supabase.from('products').select('product_name, brand').eq('id', productId).single();
+      productName = product?.product_name ?? null;
+      brand = product?.brand ?? null;
+    }
+
+    onProgress({ type: 'auto_shorts_stage', stage: 'detecting_moments' });
+    const { system, user: userPrompt } = buildAutoShortsPrompt({
+      words,
+      durationSec: metadata.durationSec,
+      numClips,
+      productName,
+      brand
+    });
+    const { text: aiText } = await callOpenAIJSON({ system, user: userPrompt, temperature: 0.4, timeoutMs: 120000 });
+
+    let moments: z.infer<typeof autoShortsMomentsSchema>['clips'];
+    try {
+      const parsedJson = JSON.parse(aiText);
+      const validated = autoShortsMomentsSchema.safeParse(parsedJson);
+      if (!validated.success) {
+        throw new Error(`AI response did not match expected schema: ${JSON.stringify(validated.error.flatten())}`);
+      }
+      moments = validated.data.clips;
+    } catch (err: any) {
+      throw new AIProviderError(err.message || 'AI response was not valid JSON', 502);
+    }
+
+    if (moments.length === 0) {
+      throw new AIProviderError('AI ไม่พบช่วงที่น่าสนใจพอสำหรับตัดคลิปสั้นจากวิดีโอนี้ — ลองวิดีโอต้นฉบับอื่น', 502);
+    }
+
+    const fontsDir = path.join(process.cwd(), 'assets', 'fonts');
+
+    for (let i = 0; i < moments.length; i++) {
+      const m = moments[i];
+      const startIdx = Math.max(0, Math.min(m.start_word_index, words.length - 1));
+      const endIdx = Math.max(startIdx, Math.min(m.end_word_index, words.length - 1));
+      const startSec = Math.max(0, words[startIdx]?.start ?? 0);
+      const endSec = Math.min(metadata.durationSec, words[endIdx]?.end ?? startSec);
+      if (endSec <= startSec) continue;
+
+      onProgress({ type: 'auto_shorts_stage', stage: 'rendering_clip', clip_index: i, title: m.title });
+
+      const clipRawPath = path.join(tmpDir, `editor_${runId}_autoshorts_${i}_raw.mp4`);
+      const assPath = path.join(tmpDir, `editor_${runId}_autoshorts_${i}.ass`);
+      const clipBurnedPath = path.join(tmpDir, `editor_${runId}_autoshorts_${i}_burned.mp4`);
+      perClipCleanup.push(clipRawPath, assPath, clipBurnedPath);
+
+      await trimAndCropVertical(sourcePath, startSec, endSec, clipRawPath);
+
+      const clipWords = sliceWordsByRange(words, startSec, endSec);
+      const clipMeta = await probeMetadata(clipRawPath);
+
+      if (clipWords.length > 0 && clipMeta.width && clipMeta.height) {
+        const rawCues = groupWordsIntoCuesSimple(clipWords, style.maxWordsPerCue);
+        const timedCuesWithWords = resolveCueTimestampsWithWords(clipWords, rawCues);
+        const assContent = buildKaraokeAss(timedCuesWithWords, {
+          fontName: style.fontName ?? 'Kanit',
+          fontSizePx: style.fontSizePx ?? 56,
+          textColorHex: style.textColorHex ?? '#FFFFFF',
+          highlightColorHex: style.highlightColorHex ?? '#FACC15',
+          videoWidth: clipMeta.width,
+          videoHeight: clipMeta.height,
+          verticalPositionPct: style.verticalPositionPct
+        });
+        fs.writeFileSync(assPath, assContent, 'utf8');
+        await burnAssSubtitles(clipRawPath, assPath, fontsDir, clipBurnedPath);
+      } else {
+        // No words landed in this clip's window (rare — e.g. a mostly-silent
+        // moment) — ship the cropped clip without captions rather than fail
+        // the whole batch over one clip.
+        fs.copyFileSync(clipRawPath, clipBurnedPath);
+      }
+
+      await onClipReady({
+        clipIndex: i,
+        startSec,
+        endSec,
+        title: m.title,
+        reason: m.reason,
+        hookScore: m.hook_score,
+        buffer: fs.readFileSync(clipBurnedPath),
+        contentType: 'video/mp4'
+      });
+
+      onProgress({ type: 'auto_shorts_stage', stage: 'clip_done', clip_index: i });
+    }
+  } finally {
+    cleanupFiles([audioPath, ...perClipCleanup]);
+  }
+}
 
 interface PunchyStyleOptions {
   burnIn: boolean;
@@ -356,6 +536,123 @@ export async function POST(request: Request) {
       async function setStatus(jobId: string, status: string) {
         emit({ type: 'status', status });
         await supabase.from('editor_jobs').update({ status }).eq('id', jobId);
+      }
+
+      // AUTO_SHORTS produces N clips, not one — handled entirely separately
+      // from the single-job flow below (which every other operation uses)
+      // rather than shoehorning a variable result count into the one-row-
+      // per-run shape. Each finished clip gets its own editor_jobs row
+      // sharing a batch_id, inserted only once we know the real clip
+      // count/titles (after moment-detection runs) — see
+      // supabase/migrations/0023_auto_shorts.sql.
+      if (input.operation === 'AUTO_SHORTS') {
+        const tmpDir = os.tmpdir();
+        const runId = randomUUID();
+        const sourcePath = path.join(tmpDir, `editor_${runId}_src.mp4`);
+        const batchId = randomUUID();
+        let clipsDone = 0;
+
+        try {
+          emit({ type: 'status', status: 'DOWNLOADING' });
+          await downloadSourceVideo(input.source_url, sourcePath, { maxBytes: MAX_BYTES_DEFAULT });
+
+          emit({ type: 'status', status: 'PROCESSING' });
+
+          await runAutoShorts(
+            sourcePath,
+            runId,
+            tmpDir,
+            input.product_id ?? null,
+            supabase,
+            input.num_clips ?? 3,
+            {
+              fontName: input.font_name,
+              fontSizePx: input.font_size_px,
+              maxWordsPerCue: input.max_words_per_cue ?? 5,
+              textColorHex: input.text_color,
+              highlightColorHex: input.highlight_color,
+              verticalPositionPct: input.vertical_position_pct
+            },
+            async (clip) => {
+              const resultFilename = `auto_shorts_${runId}_${clip.clipIndex}.mp4`;
+              const { path: resultPath, signedUrl } = await uploadEditedClip(clip.buffer, resultFilename, clip.contentType);
+
+              const { data: clipJob, error: clipInsertError } = await supabase
+                .from('editor_jobs')
+                .insert({
+                  operation: 'AUTO_SHORTS',
+                  source_url: input.source_url,
+                  options: {
+                    num_clips: input.num_clips ?? 3,
+                    font_name: input.font_name ?? null,
+                    font_size_px: input.font_size_px ?? null,
+                    max_words_per_cue: input.max_words_per_cue ?? null,
+                    text_color: input.text_color ?? null,
+                    highlight_color: input.highlight_color ?? null,
+                    vertical_position_pct: input.vertical_position_pct ?? null
+                  },
+                  product_id: input.product_id ?? null,
+                  status: 'DONE',
+                  creator_id: user.id,
+                  batch_id: batchId,
+                  clip_index: clip.clipIndex,
+                  clip_start_sec: clip.startSec,
+                  clip_end_sec: clip.endSec,
+                  clip_title: clip.title,
+                  clip_reason: clip.reason,
+                  clip_hook_score: clip.hookScore,
+                  result_path: resultPath,
+                  result_kind: 'VIDEO'
+                })
+                .select('*')
+                .single();
+
+              if (clipInsertError || !clipJob) {
+                emit({ type: 'error', error: clipInsertError?.message || 'บันทึกคลิปไม่สำเร็จ' });
+                return;
+              }
+
+              clipsDone += 1;
+              emit({
+                type: 'auto_shorts_clip_done',
+                job: clipJob,
+                result: { kind: 'VIDEO', signed_url: signedUrl },
+                clip: {
+                  clip_index: clip.clipIndex,
+                  start_sec: clip.startSec,
+                  end_sec: clip.endSec,
+                  title: clip.title,
+                  reason: clip.reason,
+                  hook_score: clip.hookScore
+                }
+              });
+
+              await supabase.from('activity_logs').insert({
+                user_id: user.id,
+                action: 'editor_run',
+                entity_type: 'editor_job',
+                entity_id: clipJob.id,
+                new_value: { operation: 'AUTO_SHORTS', clip_index: clip.clipIndex, batch_id: batchId },
+                reason: `Ran AUTO_SHORTS via Editor tool (clip ${clip.clipIndex + 1})`
+              });
+            },
+            (event) => emit(event)
+          );
+
+          emit({ type: 'batch_done', batch_id: batchId, clip_count: clipsDone });
+        } catch (err: any) {
+          let message = 'เกิดข้อผิดพลาดระหว่างประมวลผล';
+          if (err instanceof SourceImportError || err instanceof MediaProcessingError || err instanceof AIProviderError) {
+            message = err.message;
+          } else if (err?.message) {
+            message = err.message;
+          }
+          emit({ type: 'error', error: message });
+        } finally {
+          cleanupFiles([sourcePath]);
+          controller.close();
+        }
+        return;
       }
 
       const { data: job, error: insertError } = await supabase

@@ -364,6 +364,46 @@ export async function cutSilenceSegments(
   }
 }
 
+// --- Auto Shorts: trim + vertical crop ---
+// Cuts [start, end] out of the source and center-crops/scales it to 9:16 in
+// one pass. This is a plain centered crop (scale-to-cover the target aspect,
+// then crop the overflow off both sides/top-bottom) — NOT subject-tracking
+// or face-aware reframing. Honest limitation, same class as applyDelogo's
+// notice above: fine for talking-head/demo footage that's roughly centered,
+// will crop out a subject standing off-center. Frame-accurate trim uses the
+// same "-ss/-to after -i" technique as cutSilenceSegments above (slower than
+// stream-copy, but doesn't depend on the source's keyframe placement).
+export async function trimAndCropVertical(
+  filePath: string,
+  startSec: number,
+  endSec: number,
+  destPath: string,
+  targetWidth = 1080,
+  targetHeight = 1920
+): Promise<void> {
+  if (!ffmpegPath) throw new MediaProcessingError('ไม่พบ ffmpeg บนเซิร์ฟเวอร์', 'auto_shorts_trim');
+  ensureExecutable(ffmpegPath);
+  const vf = `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=increase,crop=${targetWidth}:${targetHeight}`;
+  try {
+    await execFileAsync(
+      ffmpegPath,
+      [
+        '-y',
+        '-i', filePath,
+        '-ss', String(startSec), '-to', String(endSec),
+        '-vf', vf,
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+        '-c:a', 'aac', '-avoid_negative_ts', 'make_zero',
+        destPath
+      ],
+      { maxBuffer: 1024 * 1024 * 50, timeout: 250000 }
+    );
+  } catch (err: any) {
+    console.error('[auto-shorts trim+crop] failed:', err?.message, err?.stderr?.slice?.(0, 1000) || '');
+    throw new MediaProcessingError('ตัดช่วงคลิปสั้นไม่สำเร็จ', 'auto_shorts_trim');
+  }
+}
+
 // Re-exported from fs-utils (not redefined here) so callers that only need
 // cleanup can import it without pulling ffmpeg-static/ffprobe-static into
 // their function bundle.
