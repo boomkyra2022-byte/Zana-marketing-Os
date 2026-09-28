@@ -60,7 +60,26 @@ export const maxDuration = 300;
 
 // 50MB — matches Supabase Free plan's hard Global Storage limit (see
 // components/editor-client.tsx: MAX_UPLOAD_BYTES for the full reasoning).
+// This is what actually caps SILENCE_CUT/PUNCHY_SRT/DEWATERMARK_LOCAL and
+// the direct-upload path in general, because a browser-uploaded file has to
+// land in Supabase Storage first (real Supabase-imposed ceiling — only
+// removable by upgrading the Supabase project to Pro).
 const MAX_BYTES_DEFAULT = 50 * 1024 * 1024;
+
+// AUTO_SHORTS-only override for the "วางลิงก์" (paste-link, e.g. Google
+// Drive) path specifically — user-reported bottleneck: Auto Shorts wants
+// LONGER source videos (worth cutting several clips out of), but every
+// operation was sharing the same 50MB cap even though link-mode downloads
+// never touch Supabase Storage at all (downloadSourceVideo streams straight
+// into this function's own /tmp, see lib/media/source.ts). The real ceiling
+// on THIS path is Vercel's own serverless /tmp scratch space, a fixed
+// ~500MB regardless of plan (confirmed via Vercel's own docs, Sept 2026).
+// 300MB leaves headroom for the extracted audio track + each clip's raw/ass/
+// burned intermediate files without risking "ENOSPC" mid-run. The
+// direct-upload path is UNCHANGED and still hard-capped at the real
+// Supabase 50MB limit above — this override only ever applies to the
+// server-side link download, never to the browser->Storage upload step.
+const AUTO_SHORTS_MAX_BYTES = 300 * 1024 * 1024;
 
 const requestSchema = z.object({
   operation: z.enum(['SILENCE_CUT', 'PUNCHY_SRT', 'DEWATERMARK_LOCAL', 'AUTO_SHORTS']),
@@ -193,7 +212,6 @@ async function runAutoShorts(
   onProgress: (event: Record<string, unknown>) => void
 ): Promise<void> {
   const audioPath = path.join(tmpDir, `editor_${runId}_autoshorts_audio.mp3`);
-  const perClipCleanup: string[] = [];
   try {
     const metadata = await probeMetadata(sourcePath);
     await extractAudio(sourcePath, audioPath);
@@ -252,7 +270,6 @@ async function runAutoShorts(
       const clipRawPath = path.join(tmpDir, `editor_${runId}_autoshorts_${i}_raw.mp4`);
       const assPath = path.join(tmpDir, `editor_${runId}_autoshorts_${i}.ass`);
       const clipBurnedPath = path.join(tmpDir, `editor_${runId}_autoshorts_${i}_burned.mp4`);
-      perClipCleanup.push(clipRawPath, assPath, clipBurnedPath);
 
       await trimAndCropVertical(sourcePath, startSec, endSec, clipRawPath);
 
@@ -291,10 +308,18 @@ async function runAutoShorts(
         contentType: 'video/mp4'
       });
 
+      // Clean up THIS clip's intermediate files immediately rather than
+      // batching cleanup until the whole run finishes — keeps peak /tmp disk
+      // usage down to "source video + one clip's working files" instead of
+      // "source video + every clip's working files stacked up", which is
+      // what gives AUTO_SHORTS_MAX_BYTES above room to allow a bigger source
+      // video without risking Vercel's fixed ~500MB /tmp ceiling.
+      cleanupFiles([clipRawPath, assPath, clipBurnedPath]);
+
       onProgress({ type: 'auto_shorts_stage', stage: 'clip_done', clip_index: i });
     }
   } finally {
-    cleanupFiles([audioPath, ...perClipCleanup]);
+    cleanupFiles([audioPath]);
   }
 }
 
@@ -554,7 +579,7 @@ export async function POST(request: Request) {
 
         try {
           emit({ type: 'status', status: 'DOWNLOADING' });
-          await downloadSourceVideo(input.source_url, sourcePath, { maxBytes: MAX_BYTES_DEFAULT });
+          await downloadSourceVideo(input.source_url, sourcePath, { maxBytes: AUTO_SHORTS_MAX_BYTES });
 
           emit({ type: 'status', status: 'PROCESSING' });
 

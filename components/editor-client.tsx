@@ -548,6 +548,7 @@ export default function EditorClient({ products, recentJobs }: Props) {
               />
               <p className="text-xs text-gray-500 mt-1">
                 เชื่อมผลลัพธ์จากขั้นตอนก่อนหน้าต่อกันได้ — กด &quot;ใช้ผลลัพธ์นี้เป็น Source ต่อ&quot; ด้านล่างหลังรันเสร็จ
+                {operation === 'AUTO_SHORTS' && ' — โหมดนี้รองรับไฟล์ต้นฉบับใหญ่ถึง ~300MB (ไม่ผ่าน Storage ของเรา ดาวน์โหลดตรงในเซิร์ฟเวอร์)'}
               </p>
             </>
           ) : (
@@ -557,6 +558,12 @@ export default function EditorClient({ products, recentJobs }: Props) {
                 ไฟล์อัปโหลดตรงไปที่ Storage ของเราเลย ไม่ผ่านเซิร์ฟเวอร์ API เลยไม่ติด limit ขนาดไฟล์ 4.5MB — รองรับสูงสุด{' '}
                 {(MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0)}MB
               </p>
+              {operation === 'AUTO_SHORTS' && (
+                <p className="text-xs text-accentBlue mt-1">
+                  💡 วิดีโอต้นฉบับสำหรับ Auto Shorts มักไฟล์ใหญ่กว่า 50MB — ถ้าไฟล์ใหญ่กว่านี้ ใช้โหมด &quot;วางลิงก์&quot; (Google Drive) แทน จะรองรับได้ถึง ~300MB
+                  เพราะไม่ต้องผ่านข้อจำกัดของ Supabase Storage แผนฟรี (50MB/ไฟล์)
+                </p>
+              )}
               {uploadState === 'uploading' && <p className="text-xs text-accentBlue mt-1">กำลังอัปโหลด &quot;{uploadFileName}&quot;...</p>}
               {uploadState === 'signing' && <p className="text-xs text-accentBlue mt-1">กำลังเตรียมไฟล์...</p>}
               {uploadState === 'done' && <p className="text-xs text-accentGreen mt-1">✓ &quot;{uploadFileName}&quot; พร้อมใช้งาน</p>}
