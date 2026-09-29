@@ -557,6 +557,18 @@ Concept only borrowed from the reference repo ("transcript → LLM picks N best 
 4. After Vercel finishes deploying, test live: Editor tool → เลือก "Auto Shorts" → วางลิงก์/อัปโหลดวิดีโอที่มีความยาวพอสมควร (แนะนำ 2-10 นาที เพื่อไม่ชนขีดจำกัด 300 วินาทีของการรันทั้งชุด) → ตั้งจำนวนคลิป → กด "สร้าง Auto Shorts" → ยืนยันว่าคลิปที่ได้ครอปเป็นแนวตั้งจริง มีซับเบิร์นลงจริง และหัวข้อ/เหตุผล/hook score ที่ AI ให้มาสมเหตุสมผลกับเนื้อหาจริงในคลิปนั้น.
 5. ⚠ ถ้าวิดีโอต้นฉบับยาวมาก (transcript ยาวเกิน ~6000 คำ) prompt จะตัดท้าย transcript ทิ้งและ AI จะเลือกได้แค่จากส่วนที่ตัดมา — เป็น known limitation ที่เปิดเผยไว้ใน prompt เอง ไม่ใช่ silent failure แต่ผู้ใช้ควรรู้ก่อนทดสอบกับคลิปยาวมากๆ
 
+## Prompt Library — คลัง prompt วิดีโอ/ภาพ AI แบบกรอกช่อง [ ] แล้วคัดลอก (2026-09-29, explicit user request หลังเปิดดู 2 หน้า Notion แล้วถาม "อยากเก็บเป็นคลังความรู้ไว้... หรือจะเป็นโหมดเรียกใช้แยกต่างหากเลย" — เลือก "สร้างเป็นหน้า/เครื่องมือใหม่แยกต่างหาก" ผ่าน AskUserQuestion)
+
+ที่มาของ seed data: 2 หน้า public Notion ของคอร์ส "AI Video Mastery by เข้ม KEMLIFE" — (1) 10 prompt สำเร็จรูปสำหรับ Google Gemini video-edit มีช่อง `[ ]` ให้กรอกจริงตามต้นฉบับ, (2) ตัวอย่างโครงสร้าง character-sheet (Nano Banana Pro) + shot-by-shot video prompt (Seedance 2.5) ของละครเกาหลี 4 ช็อต — เก็บไว้เป็นตัวอย่างอ้างอิงโครงสร้าง (ไม่มีช่อง `[ ]` เพราะเป็น worked example ของต้นฉบับเอง ไม่ใช่ template)
+
+- [x] `supabase/migrations/0024_prompt_library.sql` — ตาราง `prompt_library` ใหม่ (group_name, title, use_case, tool_name, aspect_ratio, prompt_template, notes, source_url, sort_order, is_favorite, created_by) + RLS (select ทุก authenticated, insert/update/delete ยกเว้น viewer) + seed 17 แถว (10 Gemini prompts + 3 character sheets + 4 shot scripts) ใช้ dollar-quoted string (`$$...$$`) กันปัญหา escape single-quote ในเนื้อ prompt ยาวๆ ที่มีคำพูดภาษาเกาหลีและ label ชื่อตัวละคร. **ยังไม่ได้รันบน Supabase จริง**
+- [x] `app/api/prompt-library/route.ts` (GET list + POST create), `app/api/prompt-library/[id]/route.ts` (PATCH + DELETE) — เหมือน pattern ของ `models/route.ts` เดิม รวมถึง explicit viewer-role check ก่อนเขียน กัน error PostgREST ดิบๆหลุดออกมา
+- [x] `types/database.ts` — เพิ่ม `PromptLibraryItem` interface
+- [x] `app/(dashboard)/prompt-library/page.tsx` (server component, fetch list) + `components/prompt-library-client.tsx` (client) — ค้นหา/กรอง, จัดกลุ่มตาม group_name, แต่ละ prompt ขยายดูได้: ถ้ามีช่อง `[LABEL]` จะแยก parse ด้วย regex ออกมาเป็นฟอร์มกรอกอัตโนมัติ (ไม่ hardcode field ตายตัว — ใช้ได้กับ prompt ไหนก็ได้ที่มี `[ ]`), preview ข้อความที่กรอกแล้วสด, ปุ่มคัดลอก (`navigator.clipboard`), แก้ไข/ทำสำเนา/ลบได้ทุกแถว (รวมแถวที่ seed มาด้วย ไม่ล็อก), ฟอร์ม "+ เพิ่ม Prompt ใหม่" ให้ผู้ใช้เพิ่มคลังของตัวเองได้ต่อไป
+- [x] `components/nav-items.ts` — เพิ่มเมนู "Prompt Library" ใต้ 02 · Strategy
+- [ ] **ยังไม่ build-test/deploy** — ต้องรัน migration ก่อน แล้ว `npm run build` ก่อน deploy ตามปกติ
+- หมายเหตุ: prompt ที่มีคำพูดภาษาเกาหลีในตัวอย่าง shot script เป็นเนื้อหาต้นฉบับจากหน้า Notion สาธารณะที่ผู้ใช้เปิดให้ดูเอง ไม่ใช่บทละครจริงที่มีเจ้าของสิทธิ์ (เป็น AI-prompt case study ไม่ใช่บทละครลิขสิทธิ์)
+
 ## Fix: Auto Shorts hitting the 50MB source-video ceiling (user report — "ปัญหาก็จะไปติดกับ Supabase ที่รองรับไฟล์แค่ 50mb", 2026-09-28)
 
 Real bottleneck, correctly flagged: every Editor operation shared one `MAX_BYTES_DEFAULT = 50MB` constant, but that number is actually TWO unrelated ceilings that happened to be equal:

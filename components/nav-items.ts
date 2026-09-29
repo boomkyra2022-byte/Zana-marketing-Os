@@ -53,6 +53,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: '/video-prompt-studio', label: 'AI Video Prompt Studio' },
       { href: '/products', label: 'Products' },
       { href: '/pricing-calculator', label: 'คำนวณราคาขาย + กำไร' },
+      { href: '/prompt-library', label: 'Prompt Library' },
       { href: '/models', label: 'Model Library' },
       { href: '/personas', label: 'Personas' }
     ]

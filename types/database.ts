@@ -86,6 +86,23 @@ export interface ModelPreset {
   updated_at: string;
 }
 
+export interface PromptLibraryItem {
+  id: string;
+  group_name: string;
+  title: string;
+  use_case: string | null;
+  tool_name: string | null;
+  aspect_ratio: string | null;
+  prompt_template: string;
+  notes: string | null;
+  source_url: string | null;
+  sort_order: number;
+  is_favorite: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Persona {
   id: string;
   name: string;
