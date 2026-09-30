@@ -105,7 +105,7 @@ export function RoasCalculatorClient() {
         <div>
           <label className="field-label">2. เช็คแอดที่ยิงอยู่จริง (ไม่บังคับ)</label>
           <p className="text-xs text-gray-500 mt-1">
-            เอาตัวเลขจาก Meta Ads Manager มาใส่ — "จำนวนเงินที่ใช้ไป" (Amount spent) และ "มูลค่า Conversion การซื้อ" (Purchase conversion value)
+            เอาตัวเลขจาก Meta Ads Manager มาใส่ — “จำนวนเงินที่ใช้ไป” (Amount spent) และ “มูลค่า Conversion การซื้อ” (Purchase conversion value)
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
