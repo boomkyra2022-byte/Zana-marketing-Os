@@ -1,29 +1,20 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 // Standalone Voiceover (text-to-speech) tool — explicit user request:
 // "เพิ่มโปรแกรมพากย์เสียงอัตโนมัติ... เลือกเสียงได้ ผู้ชาย ผู้หญิง กำหนด
 // โทนเสียงได้ มีตัวอย่างให้ฟัง คล้ายๆ Text to speech Google AI studio".
-// Default engine is OpenAI's gpt-4o-mini-tts (see lib/ai/openai.ts) — chosen
-// over Google Gemini TTS / ElevenLabs per explicit original user decision
-// (fastest to ship, zero new API key/billing setup, already used everywhere
-// else in this app).
+// Default engine is OpenAI's gpt-4o-mini-tts (see lib/ai/openai.ts).
 //
-// Multi-provider (explicit follow-up user request — "ฉันสร้างเสียงโคลน
-// ตัวเองไว้ใน Elevenlab และ Minimax ต้องการเชื่อมต่อเข้าโปรแกรม"):
-// ElevenLabs and MiniMax are added as alternate engines specifically for the
-// user's own voice clones (lib/ai/elevenlabs.ts, lib/ai/minimax.ts). We have
-// no way to know the user's specific clone voice_id(s) in advance (and they
-// may create more later), so instead of a hardcoded picker like the OpenAI
-// one below, these two providers take a raw Voice ID pasted from the user's
-// own ElevenLabs/MiniMax dashboard, plus an optional label for their own
-// reference. Successfully-used clone voices are remembered in this browser
-// (localStorage only — never sent anywhere but this device) as quick-pick
-// chips so the user doesn't have to re-paste the same ID every time.
+// ElevenLabs/MiniMax clone-voice support (briefly added, then REMOVED per
+// explicit user request: "เอา ElevenLabs/MiniMax ออกเพราะเสี่ยงเรื่อง API ที่จะโดยแฮ็ก
+// เจาะเข้ามา" — fewer third-party API keys stored server-side is fewer things
+// that can leak/get abused). OpenAI-only now. Old voiceover_jobs history rows
+// with provider='elevenlabs'/'minimax' still render fine below (they just
+// show their provider badge) — only the ability to create new ones is gone.
 
 type TtsVoice = 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'fable' | 'nova' | 'onyx' | 'sage' | 'shimmer' | 'verse' | 'marin' | 'cedar';
-type Provider = 'openai' | 'elevenlabs' | 'minimax';
 
 // OpenAI does not officially assign a gender to these voices — this
 // grouping is our own best-effort categorization based on how each voice
@@ -60,48 +51,8 @@ const VOICE_GROUPS: { label: string; voices: { value: TtsVoice; label: string; d
   }
 ];
 
-const PROVIDER_TABS: { value: Provider; label: string }[] = [
-  { value: 'openai', label: 'เสียงสำเร็จรูป (OpenAI)' },
-  { value: 'elevenlabs', label: 'เสียงโคลนของฉัน (ElevenLabs)' },
-  { value: 'minimax', label: 'เสียงโคลนของฉัน (MiniMax)' }
-];
-
 const DEMO_TEXT = 'นี่คือตัวอย่างเสียงพากย์จากระบบของเรา ลองฟังโทนเสียงและจังหวะการพูดดูนะ';
 const MAX_CHARS = 4000;
-
-interface SavedCloneVoice {
-  voiceId: string;
-  label: string;
-}
-
-function cloneVoicesStorageKey(provider: Provider) {
-  return `zana_voiceover_clones_${provider}`;
-}
-
-function loadSavedCloneVoices(provider: Provider): SavedCloneVoice[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(cloneVoicesStorageKey(provider));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveCloneVoice(provider: Provider, voiceId: string, label: string) {
-  if (typeof window === 'undefined' || !voiceId.trim()) return;
-  const existing = loadSavedCloneVoices(provider).filter((v) => v.voiceId !== voiceId.trim());
-  const next = [{ voiceId: voiceId.trim(), label: label.trim() || voiceId.trim() }, ...existing].slice(0, 8);
-  window.localStorage.setItem(cloneVoicesStorageKey(provider), JSON.stringify(next));
-}
-
-function removeCloneVoiceFromStorage(provider: Provider, voiceId: string) {
-  if (typeof window === 'undefined') return;
-  const next = loadSavedCloneVoices(provider).filter((v) => v.voiceId !== voiceId);
-  window.localStorage.setItem(cloneVoicesStorageKey(provider), JSON.stringify(next));
-}
 
 interface HistoryItem {
   id: string;
@@ -120,27 +71,44 @@ interface Props {
 
 export default function VoiceoverClient({ history: initialHistory }: Props) {
   const [text, setText] = useState('');
-  const [provider, setProvider] = useState<Provider>('openai');
   const [voice, setVoice] = useState<TtsVoice>('coral');
-  const [cloneVoiceId, setCloneVoiceId] = useState('');
-  const [cloneVoiceLabel, setCloneVoiceLabel] = useState('');
-  const [savedClones, setSavedClones] = useState<SavedCloneVoice[]>([]);
   const [instructions, setInstructions] = useState('');
   const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
+  // Separate from previewingVoice ("..." while the fetch is in flight) — this
+  // tracks which preview is ACTUALLY playing right now, so we can show a
+  // stop button and let the user cut it off mid-playback. User report:
+  // "เมื่อกดฟังเสียงแล้วควรมีปุ่มหยุดด้วย" (need a stop button after pressing play) —
+  // previously previewAudioRef was write-only (never read), so there was no
+  // way to pause/stop a preview once it started.
+  const [playingVoice, setPlayingVoice] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<{ signedUrl: string; jobId: string | null } | null>(null);
   const [error, setError] = useState('');
   const [history, setHistory] = useState<HistoryItem[]>(initialHistory);
   const [historyPlaying, setHistoryPlaying] = useState<string | null>(null);
+  const [playingHistoryId, setPlayingHistoryId] = useState<string | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const historyAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  useEffect(() => {
-    if (provider === 'openai') return;
-    setSavedClones(loadSavedCloneVoices(provider));
-  }, [provider]);
+  function stopPreview() {
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current.currentTime = 0;
+    }
+    setPlayingVoice(null);
+  }
+
+  function stopHistoryPlayback() {
+    if (historyAudioRef.current) {
+      historyAudioRef.current.pause();
+      historyAudioRef.current.currentTime = 0;
+    }
+    setPlayingHistoryId(null);
+  }
 
   async function playPreview(v: TtsVoice) {
     setError('');
+    stopPreview(); // cut off any other preview currently playing first
     setPreviewingVoice(v);
     try {
       const res = await fetch('/api/tools/voiceover/generate', {
@@ -159,40 +127,12 @@ export default function VoiceoverClient({ history: initialHistory }: Props) {
 
       const audio = new Audio(`data:${json.content_type};base64,${json.audio_base64}`);
       previewAudioRef.current = audio;
+      audio.onended = () => setPlayingVoice((cur) => (cur === v ? null : cur));
+      setPlayingVoice(v);
       await audio.play();
     } catch (err: any) {
       setError(err?.message || 'ฟังตัวอย่างไม่สำเร็จ');
-    } finally {
-      setPreviewingVoice(null);
-    }
-  }
-
-  async function playClonePreview(voiceId: string) {
-    if (!voiceId.trim()) {
-      setError('กรุณาใส่ Voice ID ก่อน');
-      return;
-    }
-    setError('');
-    setPreviewingVoice(voiceId);
-    try {
-      const res = await fetch('/api/tools/voiceover/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: (text.trim() || DEMO_TEXT).slice(0, 200),
-          provider,
-          voice: voiceId.trim(),
-          is_preview: true
-        })
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'ฟังตัวอย่างไม่สำเร็จ');
-
-      const audio = new Audio(`data:${json.content_type};base64,${json.audio_base64}`);
-      previewAudioRef.current = audio;
-      await audio.play();
-    } catch (err: any) {
-      setError(err?.message || 'ฟังตัวอย่างไม่สำเร็จ');
+      setPlayingVoice((cur) => (cur === v ? null : cur));
     } finally {
       setPreviewingVoice(null);
     }
@@ -201,11 +141,6 @@ export default function VoiceoverClient({ history: initialHistory }: Props) {
   async function generateVoiceover() {
     if (!text.trim()) {
       setError('กรุณาใส่ข้อความก่อน');
-      return;
-    }
-    const voiceValue = provider === 'openai' ? voice : cloneVoiceId.trim();
-    if (provider !== 'openai' && !voiceValue) {
-      setError('กรุณาใส่ Voice ID ของเสียงโคลนก่อน');
       return;
     }
     setError('');
@@ -217,10 +152,9 @@ export default function VoiceoverClient({ history: initialHistory }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: text.trim(),
-          provider,
-          voice: voiceValue,
-          voice_label: provider !== 'openai' ? cloneVoiceLabel.trim() || undefined : undefined,
-          instructions: provider === 'openai' ? instructions.trim() || undefined : undefined
+          provider: 'openai',
+          voice,
+          instructions: instructions.trim() || undefined
         })
       });
       const json = await res.json();
@@ -232,19 +166,15 @@ export default function VoiceoverClient({ history: initialHistory }: Props) {
           {
             id: json.job_id,
             input_text: text.trim(),
-            voice: voiceValue,
-            provider,
-            voice_label: provider !== 'openai' ? cloneVoiceLabel.trim() || null : null,
+            voice,
+            provider: 'openai',
+            voice_label: null,
             instructions: instructions.trim() || null,
             char_count: text.trim().length,
             created_at: json.created_at || new Date().toISOString()
           },
           ...prev
         ]);
-      }
-      if (provider !== 'openai') {
-        saveCloneVoice(provider, voiceValue, cloneVoiceLabel);
-        setSavedClones(loadSavedCloneVoices(provider));
       }
     } catch (err: any) {
       setError(err?.message || 'สร้างเสียงพากย์ไม่สำเร็จ');
@@ -254,6 +184,7 @@ export default function VoiceoverClient({ history: initialHistory }: Props) {
   }
 
   async function playHistoryItem(id: string) {
+    stopHistoryPlayback(); // cut off any other history item currently playing first
     setHistoryPlaying(id);
     setError('');
     try {
@@ -261,9 +192,13 @@ export default function VoiceoverClient({ history: initialHistory }: Props) {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'เปิดไฟล์เสียงไม่สำเร็จ');
       const audio = new Audio(json.signed_url);
+      historyAudioRef.current = audio;
+      audio.onended = () => setPlayingHistoryId((cur) => (cur === id ? null : cur));
+      setPlayingHistoryId(id);
       await audio.play();
     } catch (err: any) {
       setError(err?.message || 'เปิดไฟล์เสียงไม่สำเร็จ');
+      setPlayingHistoryId((cur) => (cur === id ? null : cur));
     } finally {
       setHistoryPlaying(null);
     }
@@ -317,15 +252,9 @@ export default function VoiceoverClient({ history: initialHistory }: Props) {
     URL.revokeObjectURL(url);
   }
 
-  function removeCloneVoice(p: Provider, voiceId: string) {
-    removeCloneVoiceFromStorage(p, voiceId);
-    setSavedClones(loadSavedCloneVoices(p));
-    if (cloneVoiceId === voiceId) {
-      setCloneVoiceId('');
-      setCloneVoiceLabel('');
-    }
-  }
-
+  // Kept for legacy history rows created back when ElevenLabs/MiniMax were
+  // supported — old voiceover_jobs rows may still have provider='elevenlabs'
+  // or 'minimax' and should keep displaying their real badge in history.
   function providerBadge(p?: string | null) {
     if (p === 'elevenlabs') return 'ElevenLabs';
     if (p === 'minimax') return 'MiniMax';
@@ -347,162 +276,57 @@ export default function VoiceoverClient({ history: initialHistory }: Props) {
         </div>
 
         <div>
-          <label className="field-label">แหล่งเสียง</label>
-          <div className="flex flex-wrap gap-2">
-            {PROVIDER_TABS.map((tab) => (
-              <button
-                key={tab.value}
-                type="button"
-                className={`btn-secondary text-sm ${provider === tab.value ? 'ring-2 ring-blue-500' : ''}`}
-                onClick={() => setProvider(tab.value)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+          <label className="field-label">กำหนดโทน/สไตล์การพูด (ไม่บังคับ)</label>
+          <input
+            type="text"
+            value={instructions}
+            onChange={(e) => setInstructions(e.target.value)}
+            placeholder='เช่น "พูดร่าเริง กระตือรือร้น เหมือนพรีเซนเตอร์ขายของ" หรือ "พูดช้าๆ นุ่มนวล เหมือนเล่านิทาน"'
+          />
         </div>
 
-        {provider === 'openai' && (
-          <div>
-            <label className="field-label">กำหนดโทน/สไตล์การพูด (ไม่บังคับ)</label>
-            <input
-              type="text"
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              placeholder='เช่น "พูดร่าเริง กระตือรือร้น เหมือนพรีเซนเตอร์ขายของ" หรือ "พูดช้าๆ นุ่มนวล เหมือนเล่านิทาน"'
-            />
-          </div>
-        )}
-
-        {provider === 'openai' ? (
-          <div>
-            <label className="field-label">เลือกเสียง *</label>
-            <p className="text-xs text-gray-500 mb-2">
-              OpenAI ไม่ได้ระบุเพศเสียงอย่างเป็นทางการ — การจัดกลุ่มนี้เป็นการประมาณจากลักษณะเสียงเพื่อให้เลือกง่ายขึ้น ลองกดฟังตัวอย่างก่อนตัดสินใจ
-            </p>
-            <div className="space-y-4">
-              {VOICE_GROUPS.map((group) => (
-                <div key={group.label}>
-                  <p className="text-sm font-medium text-gray-700 mb-2">{group.label}</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                    {group.voices.map((v) => (
-                      <div
-                        key={v.value}
-                        className={`card p-3 flex items-center justify-between gap-2 cursor-pointer ${voice === v.value ? 'ring-2 ring-blue-500' : ''}`}
-                        onClick={() => setVoice(v.value)}
-                      >
-                        <div>
-                          <p className="text-sm font-medium">{v.label}</p>
-                          <p className="text-xs text-gray-500">{v.desc}</p>
-                        </div>
-                        <button
-                          type="button"
-                          className="btn-secondary text-xs px-2 py-1"
-                          disabled={previewingVoice === v.value}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            playPreview(v.value);
-                          }}
-                        >
-                          {previewingVoice === v.value ? '...' : '▶ ฟัง'}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
+        <div>
+          <label className="field-label">เลือกเสียง *</label>
+          <p className="text-xs text-gray-500 mb-2">
+            OpenAI ไม่ได้ระบุเพศเสียงอย่างเป็นทางการ — การจัดกลุ่มนี้เป็นการประมาณจากลักษณะเสียงเพื่อให้เลือกง่ายขึ้น ลองกดฟังตัวอย่างก่อนตัดสินใจ
+          </p>
           <div className="space-y-4">
-            <p className="text-xs text-gray-500">
-              ต้องตั้งค่า {provider === 'elevenlabs' ? 'ELEVENLABS_API_KEY' : 'MINIMAX_API_KEY'} ใน Vercel ไว้ก่อนถึงจะใช้งานได้
-            </p>
-
-            {savedClones.length > 0 && (
-              <div>
-                <label className="field-label">เลือกเสียงที่บันทึกไว้ *</label>
-                <p className="text-xs text-gray-500 mb-2">บันทึกไว้ในเบราว์เซอร์นี้เท่านั้น — กดการ์ดเพื่อเลือกใช้ กด ฟัง เพื่อฟังตัวอย่าง</p>
+            {VOICE_GROUPS.map((group) => (
+              <div key={group.label}>
+                <p className="text-sm font-medium text-gray-700 mb-2">{group.label}</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {savedClones.map((sv) => (
+                  {group.voices.map((v) => (
                     <div
-                      key={sv.voiceId}
-                      className={`card p-3 flex items-center justify-between gap-2 cursor-pointer ${cloneVoiceId === sv.voiceId ? 'ring-2 ring-blue-500' : ''}`}
-                      onClick={() => {
-                        setCloneVoiceId(sv.voiceId);
-                        setCloneVoiceLabel(sv.label);
-                      }}
+                      key={v.value}
+                      className={`card p-3 flex items-center justify-between gap-2 cursor-pointer ${voice === v.value ? 'ring-2 ring-blue-500' : ''}`}
+                      onClick={() => setVoice(v.value)}
                     >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{sv.label}</p>
-                        <p className="text-xs text-gray-500 truncate font-mono">{sv.voiceId}</p>
+                      <div>
+                        <p className="text-sm font-medium">{v.label}</p>
+                        <p className="text-xs text-gray-500">{v.desc}</p>
                       </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          type="button"
-                          className="btn-secondary text-xs px-2 py-1"
-                          disabled={previewingVoice === sv.voiceId}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            playClonePreview(sv.voiceId);
-                          }}
-                        >
-                          {previewingVoice === sv.voiceId ? '...' : '▶ ฟัง'}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-secondary text-xs px-2 py-1"
-                          title="ลบเสียงนี้ออกจากรายการ"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeCloneVoice(provider, sv.voiceId);
-                          }}
-                        >
-                          ✕
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        className="btn-secondary text-xs px-2 py-1"
+                        disabled={previewingVoice === v.value}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (playingVoice === v.value) {
+                            stopPreview();
+                          } else {
+                            playPreview(v.value);
+                          }
+                        }}
+                      >
+                        {previewingVoice === v.value ? '...' : playingVoice === v.value ? '⏹ หยุด' : '▶ ฟัง'}
+                      </button>
                     </div>
                   ))}
                 </div>
               </div>
-            )}
-
-            <div className="card p-4 space-y-3">
-              <label className="field-label">{savedClones.length > 0 ? 'เพิ่มเสียงใหม่' : `ใส่ Voice ID ของเสียงโคลนที่สร้างไว้ใน ${provider === 'elevenlabs' ? 'ElevenLabs' : 'MiniMax'}`}</label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="field-label">Voice ID *</label>
-                  <input type="text" value={cloneVoiceId} onChange={(e) => setCloneVoiceId(e.target.value)} placeholder="วาง Voice ID ที่นี่" />
-                </div>
-                <div>
-                  <label className="field-label">ชื่อเรียก (ไม่บังคับ)</label>
-                  <input type="text" value={cloneVoiceLabel} onChange={(e) => setCloneVoiceLabel(e.target.value)} placeholder="เช่น เสียงฉัน (โทนขาย)" />
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="btn-secondary text-xs px-2 py-1"
-                  disabled={!cloneVoiceId.trim() || previewingVoice === cloneVoiceId.trim()}
-                  onClick={() => playClonePreview(cloneVoiceId)}
-                >
-                  {previewingVoice === cloneVoiceId.trim() ? '...' : '▶ ฟังตัวอย่างเสียงนี้'}
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary text-xs px-2 py-1"
-                  disabled={!cloneVoiceId.trim()}
-                  onClick={() => {
-                    saveCloneVoice(provider, cloneVoiceId, cloneVoiceLabel);
-                    setSavedClones(loadSavedCloneVoices(provider));
-                  }}
-                >
-                  บันทึกเสียงนี้ไว้ใช้ซ้ำ
-                </button>
-              </div>
-            </div>
+            ))}
           </div>
-        )}
+        </div>
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 
@@ -510,9 +334,8 @@ export default function VoiceoverClient({ history: initialHistory }: Props) {
           {generating ? 'กำลังสร้างเสียงพากย์...' : 'สร้างเสียงพากย์'}
         </button>
         <p className="text-xs text-gray-500">
-          {provider === 'openai'
-            ? 'ใช้ OpenAI TTS (gpt-4o-mini-tts) — API เดียวกับที่ระบบใช้อยู่แล้ว มีค่าใช้จ่ายตามการใช้งานจริงของ OpenAI ไม่มี rate limit จากเราเอง'
-            : `ใช้ ${provider === 'elevenlabs' ? 'ElevenLabs' : 'MiniMax'} กับเสียงโคลนของคุณเอง มีค่าใช้จ่ายตามแผนของบัญชี ${provider === 'elevenlabs' ? 'ElevenLabs' : 'MiniMax'} ที่คุณสมัครไว้`}
+          ใช้ OpenAI TTS (gpt-4o-mini-tts) — มีค่าใช้จ่ายตามการใช้งานจริงของ OpenAI ไม่มี rate limit จากเราเอง
+          (เสียงโคลนจาก ElevenLabs/MiniMax ถูกถอดออกแล้วเพื่อลดความเสี่ยงด้าน API key)
         </p>
       </div>
 
@@ -551,8 +374,19 @@ export default function VoiceoverClient({ history: initialHistory }: Props) {
                     <td className="py-2 pr-4">{h.voice_label || h.voice}</td>
                     <td className="py-2 pr-4 whitespace-nowrap">{new Date(h.created_at).toLocaleString('th-TH')}</td>
                     <td className="py-2">
-                      <button type="button" className="btn-secondary text-xs px-2 py-1" disabled={historyPlaying === h.id} onClick={() => playHistoryItem(h.id)}>
-                        {historyPlaying === h.id ? '...' : '▶ ฟัง'}
+                      <button
+                        type="button"
+                        className="btn-secondary text-xs px-2 py-1"
+                        disabled={historyPlaying === h.id}
+                        onClick={() => {
+                          if (playingHistoryId === h.id) {
+                            stopHistoryPlayback();
+                          } else {
+                            playHistoryItem(h.id);
+                          }
+                        }}
+                      >
+                        {historyPlaying === h.id ? '...' : playingHistoryId === h.id ? '⏹ หยุด' : '▶ ฟัง'}
                       </button>
                     </td>
                   </tr>

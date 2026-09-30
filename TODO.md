@@ -569,6 +569,13 @@ Concept only borrowed from the reference repo ("transcript → LLM picks N best 
 - [ ] **ยังไม่ build-test/deploy** — ต้องรัน migration ก่อน แล้ว `npm run build` ก่อน deploy ตามปกติ
 - หมายเหตุ: prompt ที่มีคำพูดภาษาเกาหลีในตัวอย่าง shot script เป็นเนื้อหาต้นฉบับจากหน้า Notion สาธารณะที่ผู้ใช้เปิดให้ดูเอง ไม่ใช่บทละครจริงที่มีเจ้าของสิทธิ์ (เป็น AI-prompt case study ไม่ใช่บทละครลิขสิทธิ์)
 
+### Follow-up: Prompt Master templates (แก้ตัวละครเองได้) — explicit user request ("ฉันไม่ต้องการให้เหมือนเขา ทำเป็น Prompt Master สำหรับแก้ไขตัวละครเอาเองได้ไหม")
+
+ตัวอย่างละครเกาหลีใน 0024 (JI-HOON/YU-JIN/SEO-A) เป็น worked example ตายตัว ไม่มีช่อง `[ ]` — ผู้ใช้อยากได้เวอร์ชัน**เทมเพลตทั่วไป** ที่แก้ตัวละคร/เนื้อเรื่องเองได้ ไม่ใช่ตัวอย่างของคนอื่น
+
+- [x] `supabase/migrations/0025_prompt_master_templates.sql` — เพิ่ม 2 แถวใหม่ในกลุ่มใหม่ "Prompt Master — โครงสร้างสำเร็จรูป (แก้ตัวละคร/เนื้อเรื่องเองได้)": (1) **Character Reference Sheet** template ทั่วไป (ใส่ `[CHARACTER NAME]`, `[NATIONALITY/ETHNICITY]`, `[AGE]`, `[OUTFIT A/B]`, `[EXPRESSION 1-4]` ฯลฯ เอง — ไม่ผูกกับตัวละครเกาหลีชุดเดิม), (2) **Shot-by-Shot Video Prompt** template ทั่วไป (FORMAT/STYLE/SUBJECT/ENVIRONMENT/AUDIO/TIMELINE โครงเดียวกับตัวอย่าง แต่ทุกช่องเป็น `[ ]` ให้กรอกเอง รวมถึงจำนวนตัวละคร/ความยาว/ภาษา/dialogue) — ทั้งสองมี notes อธิบายวิธีต่อกับ Character Sheet ผ่าน `@image1`/`@image2` และวิธีคุมให้ TIMELINE รวมเวลาได้พอดี. แถวตัวอย่างเกาหลีเดิมใน 0024 **ไม่ได้ถูกลบ/แก้** ยังอยู่เป็นตัวอย่างอ้างอิงคู่กัน
+- [ ] **ยังไม่รันบน Supabase / ยังไม่ build-test**
+
 ## Fix: Auto Shorts hitting the 50MB source-video ceiling (user report — "ปัญหาก็จะไปติดกับ Supabase ที่รองรับไฟล์แค่ 50mb", 2026-09-28)
 
 Real bottleneck, correctly flagged: every Editor operation shared one `MAX_BYTES_DEFAULT = 50MB` constant, but that number is actually TWO unrelated ceilings that happened to be equal:
@@ -583,3 +590,42 @@ Auto Shorts specifically wants LONGER source videos (worth cutting several clips
 - [ ] **Not yet build-tested or deployed** (same `HYPERVISOR_VIRT_DISABLED` sandbox limitation as above — reviewed by hand, not compiled).
 - ⚠ **Still a real, disclosed limit, not "unlimited"**: 300MB is a deliberate safety margin under Vercel's fixed `/tmp` ceiling, not the true maximum — a very long AND high-bitrate source video could still fail with a disk-space error if audio+clip working files don't fit in the remaining ~200MB. If that happens in practice, the fix is either compressing/trimming the source before uploading, or (if this becomes a frequent real blocker) considering a Vercel Pro plan for more headroom — Vercel's `/tmp` limit does not currently scale with plan tier per their own docs, so this would need re-verifying against Vercel's docs at that time, not assumed.
 - Direct-upload mode is still genuinely capped at 50MB and can only go higher with a Supabase Pro upgrade (~$25/mo, raises Global file size limit up to 500GB) — not done here since the link-mode fix above covers the actual reported blocker at zero cost.
+
+## Prompt Library — เพิ่ม "AI Video Prompt Director" master system prompt (explicit user request: "ฉันต้องการโครง Prompt แบบนี้ด้วย" พร้อมแปะ framework เต็ม)
+
+ผู้ใช้แปะ master system-prompt framework สำหรับ Google Flow ที่ยึดกฎ "10 วินาที = 1 MASTER PROMPT" อย่างเคร่งครัด (ห้ามรวมหลายช็อตไว้ใน prompt เดียวเกิน 10 วิ) แล้วขอให้เก็บเข้า Prompt Library เป็นโครงใหม่
+
+- [x] `supabase/migrations/0026_ai_video_prompt_director.sql` — เพิ่ม 1 แถวใหม่ใน `prompt_library` กลุ่มใหม่ "AI Video Prompt Director — Master System Prompt (Google Flow, กฎ 10 วิ/Prompt)" เก็บ framework master system-prompt เต็มตามที่ผู้ใช้แปะมา (verbatim) ใช้ pattern dollar-quoted string + `where not exists` seed เดียวกับ 0024/0025 กันการรันซ้ำ
+- [ ] **ยังไม่ได้รันบน Supabase จริง** — ต้องรัน `0026_ai_video_prompt_director.sql` ใน Supabase SQL Editor ก่อน แล้วค่อย `npm run build` + deploy ตามปกติ ยังไม่ build-test/deploy รอบนี้
+
+## Prompt Library — Import ชุด Prompt จาก Google Doc "รวม Prompt" (~21 tabs) (explicit user request: "รวมถึงชุด Prompt Libary นี้เข้าไปด้วย" พร้อมลิงก์ Google Doc)
+
+ผู้ใช้แชร์ลิงก์ Google Doc ชื่อ "รวม Prompt" ที่มีประมาณ 21 tabs รวม prompt หลายชุดไว้ด้วยกัน ขอให้ดึงเข้า Prompt Library ทั้งหมด — ดึงเนื้อหาจริงแบบ verbatim ผ่าน `/export?format=txt` ของ Google Doc (ไม่ได้พิมพ์สรุป/ย่อเอง)
+
+- [x] `0027_google_doc_prompt_import.sql` — เขียนไว้ที่ outputs path ของ session นี้ (`C:\Users\KYRA\AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\local-agent-mode-sessions\782a9995-568d-4405-9c8b-4dec55cd0124\a1347c0f-6084-4fba-b1b0-0b84b5bc884a\local_de4d1209-f57a-450b-919e-614f74bad1dc\outputs\0027_google_doc_prompt_import.sql`) — **ยังไม่ได้ copy เข้าโฟลเดอร์โปรเจกต์จริง** ต้อง copy ไปที่ `E:\WEB\ZANA_Marketing_OS_V2_Claude_Cowork\supabase\migrations\0027_google_doc_prompt_import.sql` ก่อนถึงจะ deploy/รันได้
+- [x] เพิ่ม 21 แถวใหม่ใน `prompt_library` แบ่งเป็น 7 กลุ่ม: (1) **ZANA Flow Prompt Director** — Custom GPT instructions เต็ม (1 แถว), (2) **Visual Metaphor / Surreal Concept Ads — ZANA Alpha Arbutin & Alpha Purple** (11 แถว: base structure, master template, generic cross-product template, Alpha Arbutin A1-A3, Alpha Purple P1-P5), (3) **UGC CGI Auto-Generate** (1 แถว), (4) **Master Prompt — POV product-in-hand commercial photography** (1 แถว), (5) **Master Prompt — Warehouse Mega Sale Canvas Banner** (1 แถว — หมายเหตุ: prompt นี้ปรากฏซ้ำกันเป๊ะๆ 2 ครั้งในเอกสารต้นฉบับ ดึงมาเก็บครั้งเดียว ไม่ insert ซ้ำ), (6) **Master Prompt — TikTok Shop Industrial UGC Ad Engine** (1 แถว), (7) **PROMPT UGC + สายพานโรงงาน** — 7 แถวของ prompt ภาพ+วิดีโอคู่กันชุดเล็กๆ (โรงงานเสื้อกันฝน 2 variant, คนแห่ซื้อสินค้าเคลียร์สต็อกคลังสินค้า, เทมเพลตสายพานลำเลียงทั่วไปแบบมีช่อง placeholder, โรงงานรองเท้า, สายพานทุเรียน, ตลาดขายส่งบรรยากาศสินค้าล้นตลาด) — ใช้ pattern dollar-quoted string + `where not exists` เหมือน 0024-0026 ทุกแถว
+- [ ] **ยังไม่ได้รันบน Supabase จริง และยังไม่ได้ copy ไฟล์เข้าโฟลเดอร์โปรเจกต์** — ขั้นตอนก่อนใช้งานได้: (1) copy ไฟล์จาก outputs path ข้างบนไปวางที่ `supabase/migrations/0027_google_doc_prompt_import.sql`, (2) รัน migration ใน Supabase SQL Editor, (3) `npm run build` + deploy ตามปกติ ยังไม่ build-test/deploy รอบนี้
+
+## Voiceover — เพิ่มปุ่มหยุดเสียงหลังกดฟัง (real bug fix, user report: "เมื่อกดฟังเสียงแล้วควรมีปุ่มหยุดด้วย")
+
+Root-caused โดยอ่านโค้ดจริง ไม่ได้เดา: `components/voiceover-client.tsx` เดิม `previewAudioRef` เป็น write-only (สร้าง `Audio` object เล่นแล้วไม่เคยอ่านค่ากลับมาใช้) และ loading state ของปุ่ม "▶ ฟัง" จะเคลียร์ทันทีหลังเริ่มเล่น (ไม่ได้ track สถานะ "กำลังเล่นอยู่จริง") ผลคือกดฟังแล้วไม่มีทางหยุดเสียงกลางคันได้เลย นอกจากรอเสียงจบเอง
+
+- [x] เพิ่ม state จริง `playingVoice` / `playingHistoryId` ที่ผูกกับ lifecycle จริงของ `Audio` object (`play` / `ended` event) แทนการเคลียร์ loading state ทันทีแบบเดิม
+- [x] เพิ่มฟังก์ชัน `stopPreview()` / `stopHistoryPlayback()` — pause + reset ตัว `Audio` object จริง ไม่ใช่แค่ซ่อนปุ่ม
+- [x] ปุ่ม "▶ ฟัง" ทุกจุด (preset เสียง OpenAI, saved clone voices ทั้ง ElevenLabs/MiniMax, manual clone voice-ID preview, และรายการใน history) ตอนนี้สลับเป็น "⏹ หยุด" ระหว่างเล่น และกดซ้ำเพื่อหยุดเสียงได้จริง
+- [x] เริ่มเล่น preview ใหม่จะหยุด preview อื่นที่กำลังเล่นอยู่ให้อัตโนมัติ กันเสียงซ้อนกันหลายตัวพร้อมกัน
+- [x] เป็น pure UI/state fix ล้วนๆ — ไม่มี migration ใหม่ ไม่มี API route ใหม่
+- [ ] **ยังไม่ build-test/deploy** — แก้เสร็จแล้วในเซสชันนี้ รอผู้ใช้รัน `npm run build` ตามปกติก่อน push/deploy
+
+## Voiceover — เอา ElevenLabs/MiniMax ออก (security-motivated removal, explicit user request: "เอา ElevenLabs/MiniMax ออกเพราะเสี่ยงเรื่อง API ที่จะโดยแฮ็กเจาะเข้ามา")
+
+บริบท: ช่วงต้นเซสชันนี้เกิดเหตุจริง — OpenAI API key รั่ว/ถูกใช้งานโดยไม่ได้รับอนุญาต (ยืนยันผ่านแท็บ Logs ของ OpenAI เอง เห็น traffic จาก third-party ที่ไม่เกี่ยวข้อง) เหตุการณ์นั้นทำให้ผู้ใช้กลับมาทบทวนความเสี่ยงของ API key third-party ทั้งหมดในแอป แล้วตัดสินใจให้เอา ElevenLabs/MiniMax ออกจาก Voiceover tool เพื่อลด attack surface
+
+Removed:
+- [x] `components/voiceover-client.tsx` — เอาแท็บเลือก "แหล่งเสียง" (provider tabs) ออกทั้งหมด: `Provider` type, `PROVIDER_TABS`, `SavedCloneVoice` interface + localStorage helpers (`loadSavedCloneVoices`/`saveCloneVoice`/`removeCloneVoiceFromStorage`), ฟังก์ชัน `playClonePreview`, state `cloneVoiceId`/`cloneVoiceLabel`/`savedClones`, และ UI ช่องกรอก clone voice-ID ทั้งหมด — Voiceover เหลือแค่ OpenAI (`gpt-4o-mini-tts` preset voices) เท่านั้น
+- [x] `app/api/tools/voiceover/generate/route.ts` — เอา import `generateSpeechElevenLabs`/`generateSpeechMinimax` ออก, zod schema ช่อง `provider` เปลี่ยนจาก `z.enum(['openai','elevenlabs','minimax'])` เป็น `z.literal('openai')`, เอา branching dispatch logic ออก — เรียก `generateSpeech` (OpenAI) อย่างเดียวเสมอ
+- [x] `lib/ai/elevenlabs.ts` และ `lib/ai/minimax.ts` — ทำเป็น stub function เฉยๆ (throw ถ้ามีอะไรเรียกใช้จริง) **ไม่ได้ลบไฟล์จริง** เพราะเครื่องมือไฟล์ของเซสชันนี้ลบไฟล์ในโฟลเดอร์โปรเจกต์ที่เชื่อมไว้ไม่ได้ — ผู้ใช้ลบไฟล์ทั้งสองเองได้ภายหลังถ้าต้องการให้สะอาดเต็มที่ แต่ไม่จำเป็นเพราะไม่มีจุดไหน import ใช้อีกแล้ว
+- [x] `app/(dashboard)/voiceover/page.tsx` — แก้คำอธิบายหน้าไม่ให้พูดถึง ElevenLabs/MiniMax อีก
+- [x] **ไม่ต้องรัน migration ใหม่** — ตรวจแล้วคอลัมน์ `voiceover_jobs.provider` ไม่มี CHECK constraint จำกัดค่า ดังนั้นแถวประวัติเก่าที่ `provider='elevenlabs'` หรือ `'minimax'` ยังแสดงผลถูกต้องในตาราง history เหมือนเดิม (badge ยังขึ้น "ElevenLabs"/"MiniMax" ผ่านฟังก์ชัน `providerBadge()` ซึ่งตั้งใจเก็บไว้ไม่แตะ) — การเปลี่ยนแปลงนี้ตัดแค่ความสามารถ "สร้างใหม่" ด้วย ElevenLabs/MiniMax เท่านั้น ไม่กระทบข้อมูลเก่า
+- ⚠ **หมายเหตุตรงไปตรงมา**: การเอา 2 provider นี้ออกช่วยลดจำนวน third-party API key ที่แอปเก็บ/เรียกใช้ (defense in depth) แต่เหตุการณ์จริงที่กระตุ้นให้ทำรอบนี้คือ OpenAI key รั่ว ไม่ใช่ ElevenLabs หรือ MiniMax — ดังนั้นการแก้นี้ช่วยลด attack surface โดยรวม ไม่ได้แก้ที่ต้นเหตุของเหตุการณ์ที่เกิดขึ้นจริงโดยตรง OpenAI key เองยังต้องดูแลเป็นพิเศษต่อไป (หมุนเวียน key ใหม่, จำกัดว่าแชร์ที่ไหนบ้าง, ตรวจสอบ usage) ไม่ว่าจะทำการเปลี่ยนแปลงนี้หรือไม่
+- [ ] **ยังไม่ build-test/deploy** — แก้เสร็จแล้วในเซสชันนี้ รอผู้ใช้รัน `npm run build` ตามปกติก่อน push/deploy

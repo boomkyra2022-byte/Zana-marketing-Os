@@ -3,8 +3,6 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@/lib/supabase/server';
 import { generateSpeech, TTS_VOICES, AIProviderError, type TtsVoice } from '@/lib/ai/openai';
-import { generateSpeechElevenLabs } from '@/lib/ai/elevenlabs';
-import { generateSpeechMinimax } from '@/lib/ai/minimax';
 import { uploadEditedClip, resignEditedClip } from '@/lib/supabase/storage';
 
 // Standalone Voiceover (text-to-speech) tool — see 0012_voiceover_jobs.sql
@@ -13,19 +11,22 @@ import { uploadEditedClip, resignEditedClip } from '@/lib/supabase/storage';
 // dead-file note in app/api/tools/flow-prompt/[id]/route.ts for how the
 // slot for this route was freed up).
 //
-// Multi-provider (0014_voiceover_multi_provider.sql, explicit user
-// request): OpenAI's preset voices remain the default/only-validated-list
-// provider; ElevenLabs and MiniMax are for the user's own voice CLONES —
-// for those, `voice` is whatever raw voice_id the user pasted from their
-// own ElevenLabs/MiniMax dashboard, not a fixed enum, since we have no way
-// to know their clone IDs in advance and they may add more later.
+// ElevenLabs/MiniMax clone-voice support (added in 0014_voiceover_multi_provider.sql)
+// was REMOVED here per explicit user request ("เอา ElevenLabs/MiniMax ออกเพราะเสี่ยง
+// เรื่อง API ที่จะโดยแฮ็กเจาะเข้ามา") — one fewer third-party API key stored/called by
+// this app is one fewer thing that can leak or get abused if compromised.
+// `voiceover_jobs.provider` in the DB still accepts any string (no CHECK
+// constraint), so old rows with provider='elevenlabs'/'minimax' in history
+// still display fine (providerBadge() on the client just shows their badge
+// label) — this only removes the ability to CREATE new ones. OpenAI-only
+// going forward.
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 const requestSchema = z
   .object({
     text: z.string().min(1, 'กรุณาใส่ข้อความ').max(4000, 'ข้อความยาวเกินไป (สูงสุด 4000 ตัวอักษรต่อครั้ง)'),
-    provider: z.enum(['openai', 'elevenlabs', 'minimax']).default('openai'),
+    provider: z.literal('openai').default('openai'),
     voice: z.string().min(1, 'กรุณาเลือก/ระบุเสียง'),
     voice_label: z.string().max(100).optional(),
     instructions: z.string().max(500).optional(),
@@ -36,11 +37,7 @@ const requestSchema = z
     is_preview: z.boolean().optional()
   })
   .superRefine((data, ctx) => {
-    // OpenAI voices are a fixed, known-good list — keep validating strictly.
-    // ElevenLabs/MiniMax voice IDs are opaque strings from the user's own
-    // account, so all we can check is "non-empty" (already covered by
-    // z.string().min(1) above).
-    if (data.provider === 'openai' && !(TTS_VOICES as readonly string[]).includes(data.voice)) {
+    if (!(TTS_VOICES as readonly string[]).includes(data.voice)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'เสียง OpenAI ไม่ถูกต้อง', path: ['voice'] });
     }
   });
@@ -91,12 +88,11 @@ export async function POST(request: Request) {
   const input = parsed.data;
 
   try {
-    const { buffer, contentType } =
-      input.provider === 'elevenlabs'
-        ? await generateSpeechElevenLabs({ text: input.text, voiceId: input.voice })
-        : input.provider === 'minimax'
-          ? await generateSpeechMinimax({ text: input.text, voiceId: input.voice })
-          : await generateSpeech({ text: input.text, voice: input.voice as TtsVoice, instructions: input.instructions });
+    const { buffer, contentType } = await generateSpeech({
+      text: input.text,
+      voice: input.voice as TtsVoice,
+      instructions: input.instructions
+    });
 
     if (input.is_preview) {
       return NextResponse.json({

@@ -15,7 +15,7 @@ export default async function VoiceoverPage() {
         <h1 className="text-2xl font-bold">พากย์เสียง (Voiceover)</h1>
         <p className="text-gray-500">
           พิมพ์หรือวางสคริปต์ เลือกเสียง กำหนดโทน/สไตล์การพูด แล้วฟังตัวอย่างก่อนสร้างไฟล์เสียงจริง — ใช้ OpenAI TTS
-          (gpt-4o-mini-tts) เป็นค่าเริ่มต้น หรือเชื่อมต่อเสียงโคลนของคุณเองจาก ElevenLabs / MiniMax ได้ ยังไม่รวมเข้ากับ Editor
+          (gpt-4o-mini-tts) เท่านั้น (ถอดเสียงโคลนจาก ElevenLabs/MiniMax ออกแล้วเพื่อลดความเสี่ยงด้าน API key) ยังไม่รวมเข้ากับ Editor
           เพื่อแทนเสียงในวิดีโอโดยตรง
         </p>
       </div>
