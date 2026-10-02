@@ -641,3 +641,19 @@ Removed:
 - [x] **ตรวจสอบเลขด้วยมือแล้ว**: price=350/cost=120 → profit=230, margin=65.71%, break-even ROAS=350/230=1.5217≈1.52 (ตรงกับสูตร "ราคาขาย ÷ กำไร" ที่แม่นกว่าของผู้ใช้เอง) และตรวจ ad-performance math กับตัวอย่างสมมติ (adSpend=5000, adRevenue=9000 → ROAS=1.8x, net profit ≈ 914.29 บาท) คำนวณ 2 วิธีอิสระแล้วได้ค่าตรงกัน
 - ⚠ **ข้อจำกัดที่เปิดเผยตรงไปตรงมา**: ส่วน "เช็คผลแอดจริง" สมมติว่ายอดขายจากแอดทั้งหมดมาจากสินค้าที่มีสัดส่วนราคา/ต้นทุนเดียวกับที่กรอกไว้ด้านบน — ถ้าแคมเปญขายหลาย SKU ที่ margin ต่างกัน ตัวเลขกำไรสุทธิจะเป็นค่าประมาณ ไม่ใช่ค่าที่แม่นยำ 100% เปิดเผยไว้ตรงๆ ในตัว UI เอง (ข้อความเล็กด้านล่างเครื่องมือ)
 - [ ] **ยังไม่ build-test หรือ deploy** — ยังไม่ได้รัน `npm run build` ในเซสชันนี้ ต้องทำก่อน `git push`
+
+## Hook Library — "300 Hook ปิดการขาย" 15 สาย + AI ปรับตามสินค้า (2026-10-02, explicit user request: "เพิ่มระบบคิด Hook แบบนี้เข้าไป" พร้อมแปะเอกสาร 300 Hook)
+
+ถามผู้ใช้ก่อน 2 ข้อผ่าน AskUserQuestion — ตำแหน่ง: **"ทั้งสองที่"** (หน้าแยก + Step ใน AI Video Prompt Studio) / วิธีคิด: **"คลัง + AI ปรับตามสินค้า"**
+
+- [x] `prompts/hook-library.ts` (new) — 300 ประโยคตามเอกสารผู้ใช้แบบคำต่อคำ แบ่ง 15 สาย × 20 (นับด้วยสคริปต์แล้ว = 300) แต่ละสายมี `position` (opening/closing/both), `funnel`, `intent` + `buildHookAdaptMessages()` (few-shot จากสายที่เลือก + ข้อมูลสินค้าจริง, ห้ามใส่ราคา/ส่วนลด/เคลมที่ไม่มีในข้อมูล, คุม ครับ/ค่ะ ตามเสียงผู้พูด) ไม่มี server-only import — client import ได้
+- [x] `app/api/video-prompt-studio/generate/route.ts` — เพิ่ม `action: 'hooks'` ในไฟล์เดิม (ไม่เพิ่ม route.ts ใหม่) ใช้ `callOpenAIJSON` + `requireNonViewer`; เพิ่ม `hook_category`/`opening_hook`/`closing_line` ใน variables schema
+- [x] `prompts/video-prompt-studio.ts` — `hookBlock()`: section ใหม่ "HOOK & CLOSING LINE (LOCKED COPY)" ต่อจาก CREATIVE STRATEGY สั่งให้ใช้ประโยคคำต่อคำ, Hook ต้องจบใน 3 วินาทีแรก, เลือกวิธีส่ง (voiceover/on-screen text) ตาม Voice/Text mode ที่เลือก — ไม่ใส่ section นี้เลยถ้าไม่ได้เลือกประโยค
+- [x] `components/hook-picker.tsx` (new) — ตัวเลือก 1 slot: เลือกสาย, สุ่มจากคลัง, ให้ AI ปรับตามสินค้า (5 ประโยค), กดเลือก, แก้คำเองใน textarea
+- [x] `components/video-prompt-studio-client.tsx` — เพิ่ม Step 8 "Hook" (Generate เลื่อนเป็น Step 9, ใช้ค่าคงที่ `GENERATE_STEP`), สรุป Hook ที่เลือกเหนือปุ่ม Generate, เปลี่ยน 1-Click Preset แล้ว **ไม่ล้าง** Hook ที่เลือกไว้
+- [x] `components/hook-generator-client.tsx` + `app/(dashboard)/hook-generator/page.tsx` (new) — หน้าแยก: เลือกสินค้า/เสียง/ตำแหน่ง, chip 15 สาย, ค้นหาข้ามทุกสาย, Copy รายประโยค, AI คิด 5/10 ประโยค + Copy ทั้งหมด — ไม่บันทึกลง DB
+- [x] `components/nav-items.ts` — เพิ่ม "Hook Generator" ใน 02 · Strategy ต่อจาก AI Video Prompt Studio
+- ไม่มี migration ใหม่, ไม่มี npm dependency ใหม่
+- [ ] **ยังไม่ build-test / deploy** — เซสชันนี้รัน `npm run build` ไม่ได้ ต้องรันก่อน push
+- [ ] ทดสอบจริงหลัง deploy: (1) `/hook-generator` เลือกสาย/ค้นหา/Copy ได้ (2) ให้ AI คิด Hook กับสินค้าจริง — ไม่มีราคา/เคลมที่ไม่มีในข้อมูล (3) Video Prompt Studio Step 8 เลือก Hook → Generate → prompt มี section "HOOK & CLOSING LINE" พร้อมประโยคตรงตัว
+- ⚠ **ข้อจำกัดที่เปิดเผย**: (a) Hook ที่ AI เขียนไม่ได้บันทึกเก็บ — refresh แล้วหาย ต้อง copy เอง (b) ยังไม่มีการผูกผล performance (hook rate/CTR) กลับมาที่ Hook แต่ละประโยค — ระบบยังไม่รู้ว่าสายไหนชนะจริง (c) ประโยคในคลังบางตัวลงท้าย "ค่ะ" ตามเอกสารต้นฉบับ — ถ้าใช้เสียงผู้ชายต้องแก้คำเองหรือใช้ AI ปรับ (d) สายที่พูดถึงโปร/คูปอง/ตะกร้า เขียนมาสำหรับ TikTok Shop — ถ้าใช้กับ Meta Ads ที่ปิดการขายทางแชท/โทร ต้องแก้ CTA

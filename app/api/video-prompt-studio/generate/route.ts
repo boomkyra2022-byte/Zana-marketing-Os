@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { requireNonViewer } from '@/lib/auth/guards';
 import { buildMasterVideoPrompt, type VideoPromptVariables } from '@/prompts/video-prompt-studio';
+import { buildHookAdaptMessages, getHookCategory } from '@/prompts/hook-library';
+import { AIProviderError, callOpenAIJSON } from '@/lib/ai/openai';
 
 // ZANA AI Video Prompt Studio — P0. One route.ts dispatched by `action`,
 // same pattern that resolved the Vercel Hobby function-count incidents on
@@ -12,6 +14,11 @@ import { buildMasterVideoPrompt, type VideoPromptVariables } from '@/prompts/vid
 // row after the user has a prompt they want to keep). `recommend` (Auto
 // Best Mode) is P3 — not implemented yet, added to this same file when it
 // ships rather than as a new route.ts.
+//
+// `hooks` (2026-10-02, Hook Library — "เพิ่มระบบคิด Hook แบบนี้เข้าไป"): AI
+// rewrites the selected สาย's library lines around a real product's facts.
+// Added as an action here (not a new route.ts) for the same function-count
+// reason; used by both the Hook step in this wizard and /hook-generator.
 export const runtime = 'nodejs';
 
 const variablesSchema: z.ZodType<VideoPromptVariables> = z
@@ -46,7 +53,11 @@ const variablesSchema: z.ZodType<VideoPromptVariables> = z
     funnel_structure: z.string().max(300).nullable().optional(),
     content_focus: z.string().max(200).nullable().optional(),
     transition_speed: z.string().max(100).nullable().optional(),
-    objective: z.string().max(300).nullable().optional()
+    objective: z.string().max(300).nullable().optional(),
+    // Hook step — locked verbatim into the Master Prompt when present.
+    hook_category: z.string().max(100).nullable().optional(),
+    opening_hook: z.string().max(300).nullable().optional(),
+    closing_line: z.string().max(300).nullable().optional()
   })
   .passthrough(); // forward-compatible with option groups added in P1-P3 without a route change
 
@@ -65,7 +76,16 @@ const saveSchema = z.object({
   compiled_prompt: z.string().min(1).max(20000)
 });
 
-const requestSchema = z.discriminatedUnion('action', [compileSchema, saveSchema]);
+const hooksSchema = z.object({
+  action: z.literal('hooks'),
+  product_id: z.string().uuid().nullable().optional(),
+  category_id: z.string().min(1).max(100),
+  slot: z.enum(['opening', 'closing']),
+  count: z.number().int().min(1).max(10).optional(),
+  voice: z.string().max(100).nullable().optional()
+});
+
+const requestSchema = z.discriminatedUnion('action', [compileSchema, saveSchema, hooksSchema]);
 
 export async function POST(request: Request) {
   const supabase = createClient();
@@ -86,6 +106,46 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid request', details: parsed.error.flatten() }, { status: 400 });
   }
   const input = parsed.data;
+
+  if (input.action === 'hooks') {
+    // Costs an AI call — same guard as every other generate action.
+    const guard = await requireNonViewer(supabase, user.id);
+    if (!guard.ok) return NextResponse.json({ error: guard.message }, { status: 403 });
+
+    const category = getHookCategory(input.category_id);
+    if (!category) return NextResponse.json({ error: 'ไม่พบสาย Hook ที่เลือก' }, { status: 400 });
+
+    const { data: hookProduct } = input.product_id
+      ? await supabase.from('products').select('product_name, brand, category, usp, benefits, usage, allowed_claims, banned_claims').eq('id', input.product_id).single()
+      : { data: null };
+
+    const { system, user: userPrompt } = buildHookAdaptMessages({
+      product: hookProduct ?? null,
+      category,
+      slot: input.slot,
+      count: input.count ?? 5,
+      voice: input.voice ?? null
+    });
+
+    try {
+      const { text, model } = await callOpenAIJSON({ system, user: userPrompt, temperature: 0.9, timeoutMs: 60000 });
+      let parsedJson: any;
+      try {
+        parsedJson = JSON.parse(text);
+      } catch {
+        return NextResponse.json({ error: 'AI ตอบกลับมาในรูปแบบที่อ่านไม่ได้ ลองกดใหม่อีกครั้ง' }, { status: 502 });
+      }
+      const hooks = (Array.isArray(parsedJson?.hooks) ? parsedJson.hooks : [])
+        .map((h: any) => ({ text: String(h?.text ?? '').trim(), angle: String(h?.angle ?? '').trim() }))
+        .filter((h: { text: string }) => h.text.length > 0)
+        .slice(0, 10);
+      if (hooks.length === 0) return NextResponse.json({ error: 'AI ไม่ได้ส่ง Hook กลับมา ลองกดใหม่อีกครั้ง' }, { status: 502 });
+      return NextResponse.json({ hooks, model, has_product: !!hookProduct });
+    } catch (err) {
+      if (err instanceof AIProviderError) return NextResponse.json({ error: err.message }, { status: err.status });
+      return NextResponse.json({ error: 'เรียก AI ไม่สำเร็จ' }, { status: 502 });
+    }
+  }
 
   const [{ data: product }, { data: modelPreset }] = await Promise.all([
     input.product_id ? supabase.from('products').select('*').eq('id', input.product_id).single() : Promise.resolve({ data: null }),

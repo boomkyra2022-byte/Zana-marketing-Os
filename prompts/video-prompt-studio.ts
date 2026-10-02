@@ -59,6 +59,11 @@ export interface VideoPromptVariables {
   content_focus?: string | null;
   transition_speed?: string | null;
   objective?: string | null;
+  // Hook step (prompts/hook-library.ts) — the exact Thai lines the user
+  // picked/edited. Locked verbatim into the prompt by hookBlock() below.
+  hook_category?: string | null;
+  opening_hook?: string | null;
+  closing_line?: string | null;
 }
 
 // Layer 1 — never rendered from client input, never optional. Mirrors the
@@ -291,6 +296,44 @@ automatically according to the selected funnel stage.${
   }${v.content_focus ? ` Content focus: ${v.content_focus}.` : ''}`;
 }
 
+// Hook step. Unlike every other Layer-2 variable (a style *choice* the video
+// tool interprets), these are finished Thai copy lines — the tool must use
+// them as written, not paraphrase them, otherwise the user's tested hook is
+// lost. Omitted entirely when neither line is set (Hook Style: Auto in
+// CREATIVE STRATEGY still applies).
+function hookBlock(v: VideoPromptVariables): string {
+  const opening = (v.opening_hook || '').trim();
+  const closing = (v.closing_line || '').trim();
+  if (!opening && !closing) return '';
+  const noVoice = (v.voice_gender || '').toLowerCase().includes('no voice');
+  const noText = !v.text_mode || v.text_mode === 'None';
+  const delivery = noVoice && noText ? 'as on-screen Thai text (no voiceover is selected, so text is the only way to deliver it)' : noVoice ? 'as on-screen Thai text' : noText ? 'as Thai voiceover' : 'as Thai voiceover, with matching on-screen text';
+  const lines = [
+    `==================================================
+HOOK & CLOSING LINE (LOCKED COPY)
+==================================================
+
+Deliver the lines below ${delivery}. Use them EXACTLY as written — do not
+translate, paraphrase, extend, or replace them. The rest of the script is
+yours to write, but it must lead out of the opening hook and into the
+closing line naturally.`
+  ];
+  if (opening) {
+    lines.push(`OPENING HOOK — Scene 1, starts at 0.0s, fully delivered within the first 3 seconds:
+"${opening}"
+The first frame must be a visual pattern interrupt that makes this line true
+at a glance (show the product / the situation the line refers to
+immediately — no logo intro, no slow establishing shot).`);
+  }
+  if (closing) {
+    lines.push(`CLOSING LINE — final scene, last thing the viewer hears/reads:
+"${closing}"
+Hold the exact product in frame while it is delivered.`);
+  }
+  lines.push('Never add a price, discount, percentage or deadline to these lines — none is provided in this prompt.');
+  return lines.join('\n\n');
+}
+
 // The Master Prompt Compiler. Section order follows the spec doc's
 // Architecture table and the original 15-section template almost exactly —
 // only reorganized where two sections shared one concern (Camera folded
@@ -314,6 +357,7 @@ VIDEO: Duration ${v.duration_sec ?? 10}s · Aspect Ratio 9:16 · Scenes ${v.scen
     `==================================================\nPRODUCT FACTS\n==================================================\n\n${productFactsBlock(product)}`,
     `==================================================\nCHARACTER\n==================================================\n\n${characterBlock(v, modelPreset)}`,
     creativeStrategyBlock(v),
+    hookBlock(v),
     skincare ? skincareEngineBlock(v) : '',
     sceneAndCameraBlock(v),
     voiceAndTextBlock(v),

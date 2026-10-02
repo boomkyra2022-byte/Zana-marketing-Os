@@ -62,6 +62,10 @@ dependency ใหม่), รัน migration `0023_video_prompt_studio.sql` ใ
 push/deploy สำเร็จหรือยัง แล้วลองเข้าหน้า `/video-prompt-studio` จริงดูว่า wizard ทำงานได้ครบ
 8 step หรือไม่
 
+**งานล่าสุด (2026-10-02): Hook Library** — คลัง 300 Hook 15 สาย + AI ปรับตามสินค้า อยู่ 2 ที่: หน้า `/hook-generator`
+และ Step 8 "Hook" ใน AI Video Prompt Studio (ประโยคที่เลือกถูกล็อกลง Master Prompt) รายละเอียดไฟล์อยู่ท้าย `TODO.md` หัวข้อ
+"Hook Library" — **ยังไม่ยืนยันว่า build ผ่าน/deploy แล้ว ถามก่อนถ้ายังไม่เคยถาม** (ไม่มี migration/dependency ใหม่)
+
 ## 4. รายการที่ต้องเช็ค/ทำต่อ (pending)
 
 0. **[ใหม่] ยืนยัน AI Video Prompt Studio P0** ว่า build/migration 0023/deploy สำเร็จ และเข้าหน้า

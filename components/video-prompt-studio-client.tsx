@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import type { ModelPreset, Product, VideoPromptPreset } from '@/types/database';
 import { checkScriptPace, isSkincareCategory, type VideoPromptVariables } from '@/prompts/video-prompt-studio';
+import { hookCategoriesFor, hookVoiceFromVideoVoice } from '@/prompts/hook-library';
+import HookPicker from '@/components/hook-picker';
 
 // AI Video Prompt Studio — P0 wizard (spec doc "ZANA AI Video Prompt Studio
 // — Spec & Build Plan", UI Flow section). 9 steps as a single-page wizard
@@ -47,8 +49,12 @@ const STEPS = [
   { id: 5, label: 'Visual Style' },
   { id: 6, label: 'Scene Engine' },
   { id: 7, label: 'Voice/Text' },
-  { id: 8, label: 'Generate' }
+  // Hook step (2026-10-02) — sits after Voice/Text so the AI adapt call
+  // already knows the voice gender (ครับ/ค่ะ).
+  { id: 8, label: 'Hook' },
+  { id: 9, label: 'Generate' }
 ];
+const GENERATE_STEP = 9;
 
 function FieldSelect({
   label,
@@ -96,6 +102,10 @@ export default function VideoPromptStudioClient({
   const [modelPresetId, setModelPresetId] = useState('');
   const [vars, setVars] = useState<VideoPromptVariables>(BASE_VARS);
   const [activePresetId, setActivePresetId] = useState<string | null>(null);
+  // Which สาย each Hook slot is browsing — UI state only; the chosen lines
+  // themselves live in vars.opening_hook / vars.closing_line.
+  const [openingCategoryId, setOpeningCategoryId] = useState(() => hookCategoriesFor('opening')[0].id);
+  const [closingCategoryId, setClosingCategoryId] = useState(() => hookCategoriesFor('closing').find((c) => c.position === 'closing')?.id ?? hookCategoriesFor('closing')[0].id);
   const [compiledPrompt, setCompiledPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -118,12 +128,20 @@ export default function VideoPromptStudioClient({
   // 2) the old Master Prompt stayed on screen after switching presets;
   // 3) variables merged onto the previous preset's, so fields leaked between presets.
   function applyPreset(preset: VideoPromptPreset) {
-    setVars({ ...BASE_VARS, ...(preset.variables as VideoPromptVariables) });
+    // A preset is a *style*; the hook lines are *copy* the user picked — keep
+    // them when switching presets instead of wiping them with everything else.
+    setVars((prev) => ({
+      ...BASE_VARS,
+      ...(preset.variables as VideoPromptVariables),
+      hook_category: prev.hook_category,
+      opening_hook: prev.opening_hook,
+      closing_line: prev.closing_line
+    }));
     setActivePresetId(preset.id);
     setCompiledPrompt('');
     setSavedMessage('');
     setError('');
-    setStep(8);
+    setStep(GENERATE_STEP);
   }
 
   const activePreset = presets.find((p) => p.id === activePresetId) ?? null;
@@ -345,6 +363,57 @@ export default function VideoPromptStudioClient({
 
       {step === 8 && (
         <div className="space-y-4 max-w-3xl">
+          <p className="text-sm text-gray-500">
+            เลือกประโยคเปิดคลิป (3 วินาทีแรก) และประโยคปิดการขายท้ายคลิป จากคลัง 300 Hook หรือให้ AI ปรับตามสินค้าที่เลือกใน Step 1 — ประโยคที่เลือกจะถูกล็อกลง Master Prompt
+            แบบคำต่อคำ เว้นว่างได้ถ้าอยากให้เครื่องมือวิดีโอคิดเอง
+          </p>
+          <HookPicker
+            slot="opening"
+            title="Hook เปิดคลิป"
+            hint="ต้องพูดจบใน 2-3 วินาที — ยิ่งสั้นยิ่งหยุดนิ้วได้ดี"
+            productId={productId}
+            voice={hookVoiceFromVideoVoice(vars.voice_gender)}
+            categoryId={openingCategoryId}
+            onCategoryChange={(id) => {
+              setOpeningCategoryId(id);
+              set('hook_category', id);
+            }}
+            value={vars.opening_hook ?? ''}
+            onChange={(text) => {
+              set('opening_hook', text);
+              set('hook_category', openingCategoryId);
+            }}
+          />
+          <HookPicker
+            slot="closing"
+            title="ประโยคปิดการขายท้ายคลิป"
+            hint="CTA เดียว ชัด ไม่กดดัน — ห้ามใส่ราคา/ส่วนลดที่ยังไม่ได้เช็กกับโปรปัจจุบัน"
+            productId={productId}
+            voice={hookVoiceFromVideoVoice(vars.voice_gender)}
+            categoryId={closingCategoryId}
+            onCategoryChange={setClosingCategoryId}
+            value={vars.closing_line ?? ''}
+            onChange={(text) => set('closing_line', text)}
+          />
+        </div>
+      )}
+
+      {step === GENERATE_STEP && (
+        <div className="space-y-4 max-w-3xl">
+          {(vars.opening_hook || vars.closing_line) && (
+            <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+              {vars.opening_hook && (
+                <p>
+                  <span className="text-gray-500">Hook เปิด:</span> {vars.opening_hook}
+                </p>
+              )}
+              {vars.closing_line && (
+                <p>
+                  <span className="text-gray-500">ปิดท้าย:</span> {vars.closing_line}
+                </p>
+              )}
+            </div>
+          )}
           <button type="button" className="btn-primary" onClick={handleGenerate} disabled={loading}>
             {loading ? 'กำลังสร้าง...' : 'Generate Master Prompt'}
           </button>

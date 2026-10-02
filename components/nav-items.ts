@@ -51,6 +51,9 @@ export const NAV_GROUPS: NavGroup[] = [
       // separate nav entry from Flow Prompt Director, not a replacement —
       // explicit user decision when the two options were presented.
       { href: '/video-prompt-studio', label: 'AI Video Prompt Studio' },
+      // Hook Library (2026-10-02) — 300 hooks / 15 สาย + AI adapt. Same data
+      // the AI Video Prompt Studio "Hook" step uses (prompts/hook-library.ts).
+      { href: '/hook-generator', label: 'Hook Generator' },
       { href: '/products', label: 'Products' },
       { href: '/pricing-calculator', label: 'คำนวณราคาขาย + กำไร' },
       { href: '/roas-calculator', label: 'คำนวณ ROAS Facebook' },
