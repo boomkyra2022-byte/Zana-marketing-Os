@@ -9,7 +9,7 @@ export interface NavGroup {
   // class names in app/globals.css and the SECTION_ACCENT map in
   // app/(dashboard)/dashboard/page.tsx — kept separate from `label` so
   // relabeling a group in the UI never silently breaks its color mapping.
-  slug: 'intelligence' | 'strategy' | 'distribution' | 'analytics';
+  slug: 'intelligence' | 'strategy' | 'distribution' | 'analytics' | 'sales';
   items: NavItem[];
 }
 
@@ -31,6 +31,11 @@ export const NAV_SETTINGS: NavItem = { href: '/settings', label: 'Settings' };
 // - Distribution = tools that produce a publishable asset (Editor, Voiceover)
 // - Analytics = tools that measure what already ran (Video Analyzer, Ads Automation)
 export const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'AI Sales',
+    slug: 'sales',
+    items: [{ href: '/ai-chat', label: 'AI Chat' }]
+  },
   {
     label: '01 · Intelligence',
     slug: 'intelligence',
