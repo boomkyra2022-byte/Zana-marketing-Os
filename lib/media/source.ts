@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { extractDriveFileId, downloadDriveFile, DriveImportError } from './drive';
+import { isTikTokUrl, resolveTikTokVideo, tiktokDownloadHeaders, TikTokError } from './tiktok';
 
 export class SourceImportError extends Error {
   stage: string;
@@ -23,22 +24,26 @@ const ALLOWED_MIME_PREFIXES = ['video/mp4', 'video/quicktime', 'video/webm', 'vi
 // components/editor-client.tsx: MAX_UPLOAD_BYTES for the full reasoning).
 const MAX_BYTES_DEFAULT = 50 * 1024 * 1024;
 
-export type SourceKind = 'drive' | 'url';
+export type SourceKind = 'drive' | 'tiktok' | 'url';
 
 export function detectSourceKind(input: string): SourceKind {
-  return /drive\.google\.com/.test(input) ? 'drive' : 'url';
+  if (/drive\.google\.com/.test(input)) return 'drive';
+  // A TikTok share link is an HTML page, not a file — it has to be resolved
+  // to the real MP4 first (lib/media/tiktok.ts).
+  if (isTikTokUrl(input)) return 'tiktok';
+  return 'url';
 }
 
-async function downloadDirectUrl(
+export async function downloadDirectUrl(
   url: string,
   destPath: string,
-  opts: { maxBytes?: number } = {}
+  opts: { maxBytes?: number; headers?: Record<string, string> } = {}
 ): Promise<{ mimeType: string | null; bytes: number }> {
   const maxBytes = opts.maxBytes ?? MAX_BYTES_DEFAULT;
 
   let res: Response;
   try {
-    res = await fetch(url, { redirect: 'follow' });
+    res = await fetch(url, { redirect: 'follow', headers: opts.headers });
   } catch {
     throw new SourceImportError('เชื่อมต่อลิงก์วิดีโอไม่สำเร็จ — ตรวจสอบ URL อีกครั้ง', 'download_failed');
   }
@@ -97,12 +102,24 @@ export async function downloadSourceVideo(
   destPath: string,
   opts: { maxBytes?: number } = {}
 ): Promise<{ mimeType: string | null; bytes: number }> {
-  if (detectSourceKind(sourceUrl) === 'drive') {
+  const kind = detectSourceKind(sourceUrl);
+  if (kind === 'drive') {
     try {
       const fileId = extractDriveFileId(sourceUrl);
       return await downloadDriveFile(fileId, destPath, opts);
     } catch (err) {
       if (err instanceof DriveImportError) {
+        throw new SourceImportError(err.message, err.stage);
+      }
+      throw err;
+    }
+  }
+  if (kind === 'tiktok') {
+    try {
+      const video = await resolveTikTokVideo(sourceUrl);
+      return await downloadDirectUrl(video.videoUrl, destPath, { ...opts, headers: tiktokDownloadHeaders() });
+    } catch (err) {
+      if (err instanceof TikTokError) {
         throw new SourceImportError(err.message, err.stage);
       }
       throw err;

@@ -67,7 +67,8 @@ export const NAV_GROUPS: NavGroup[] = [
     slug: 'distribution',
     items: [
       { href: '/editor', label: 'Editor' },
-      { href: '/voiceover', label: 'พากย์เสียง' }
+      { href: '/voiceover', label: 'พากย์เสียง' },
+      { href: '/tiktok-downloader', label: 'TikTok Downloader' }
     ]
   },
   {
