@@ -3,6 +3,48 @@
 // _shared/meta-client.ts — see that file for why token is passed explicitly.
 
 import { metaGet } from '../_shared/meta-client.ts';
+import { toDiscovered, type DiscoveredAccount } from './parse.ts';
+
+// Account-level info (name, Meta's own status code, currency, owner business).
+// This is also the cheapest permission probe: a token with no ads_read on the
+// account fails here with Meta error 200, before the heavier adsets/insights calls.
+export async function fetchAccountInfo(metaAccountId: string, token: string): Promise<DiscoveredAccount> {
+  const raw = await metaGet<Record<string, unknown>>(
+    `/${metaAccountId}`,
+    { fields: 'id,name,account_status,currency,timezone_name,business{id,name}' },
+    token
+  );
+  const info = toDiscovered(raw);
+  if (!info) throw new Error('Meta account info response had no usable id');
+  return info;
+}
+
+// Every ad account this token can reach (System User: the accounts assigned to
+// it). Used to discover accounts nobody registered yet. Paginates, capped so a
+// runaway cursor can never loop forever.
+export async function fetchAccessibleAccounts(token: string): Promise<DiscoveredAccount[]> {
+  const found: DiscoveredAccount[] = [];
+  let after: string | undefined;
+  for (let page = 0; page < 5; page += 1) {
+    const params: Record<string, string> = {
+      fields: 'id,name,account_status,currency,timezone_name,business{id,name}',
+      limit: '100'
+    };
+    if (after) params.after = after;
+    const res = await metaGet<{ data?: unknown[]; paging?: { cursors?: { after?: string }; next?: string } }>(
+      '/me/adaccounts',
+      params,
+      token
+    );
+    for (const row of res.data ?? []) {
+      const account = toDiscovered(row);
+      if (account) found.push(account);
+    }
+    after = res.paging?.next ? res.paging.cursors?.after : undefined;
+    if (!after) break;
+  }
+  return found;
+}
 
 export interface MetaAdSetInsight {
   ad_id?: string;
