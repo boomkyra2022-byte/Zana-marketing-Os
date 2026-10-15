@@ -161,3 +161,14 @@ npm run build
 - ไฟล์รอบนี้: เพิ่ม lib/ai-chat/issues.ts; แก้ lib/ai-chat/ai.ts, lib/ai-chat/server.ts, app/api/ai-chat/route.ts, components/ai-chat-client.tsx, tests/ai-chat.test.cjs และรายงานนี้
 - งานที่ต้องใช้ข้อมูลจากเจ้าของ: ใส่ OpenAI Key ที่ใช้งานได้ในช่องทางจัดเก็บ secret และตั้ง Messenger credentials ที่ยังขาด จากนั้นจึงตรวจ live end-to-end ต่อ
 - อ้างอิงสาเหตุ 401: https://developers.openai.com/api/docs/guides/error-codes
+
+## Webhook diagnostics (15 ตุลาคม 2026, migration 0030)
+
+เหตุผล: ตอนต่อ Meta จริงครั้งแรก ข้อความไม่เข้า Inbox และไม่มีร่องรอยใดเหลือ เพราะคำขอที่ถูกปฏิเสธก่อนบันทึกข้อมูล (ลายเซ็นผิด, รูปแบบข้อมูลไม่ตรง, คนละ Page, event มาแบบ `standby`) ไม่ทิ้งอะไรไว้ และหน้า Logs ของ hosting มองไม่เห็นคำขอที่ทดสอบเอง จึงเพิ่มตาราง `chat_webhook_events` (ลบทิ้งได้ภายหลัง)
+
+- ทุกครั้งที่มีการเรียก `POST /api/integrations/meta/webhook` จะบันทึก 1 แถว: เวลา, ผลลัพธ์, HTTP status, ขนาด, มี/ไม่มี signature header, User-Agent, และ **รูปร่าง** ของ payload (ID เพจ, ชื่อ key เช่น `messaging`/`standby`/`changes`, ชนิด event)
+- **ไม่เก็บ** ข้อความลูกค้า ชื่อ ลิงก์ไฟล์แนบ token หรือ secret; ข้อผิดพลาดการ parse เก็บเฉพาะ path/code ของ schema ไม่อ้างอิงเนื้อหา
+- ผลลัพธ์ที่เป็นไปได้: `NOT_CONFIGURED`, `INVALID_SIGNATURE`, `INVALID_EVENT`, `RATE_LIMITED`, `OK`, `OK_NO_EVENTS` (ลายเซ็นถูกแต่ไม่มีข้อความที่เข้าเงื่อนไข เช่น Test ของแดชบอร์ด, Page ID ไม่ตรง, event เป็น standby), `ERROR`
+- ผลลัพธ์ที่ใครก็ส่งได้โดยไม่มี credential (`INVALID_SIGNATURE`, `NOT_CONFIGURED`, `ERROR`) ถูกจำกัด 10 แถว/นาที กันตารางโดนถล่ม; ลบแถวเก่ากว่า 14 วันอัตโนมัติ
+- การบันทึกเป็น best-effort: ล้มเหลวแล้วไม่กระทบการตอบ Meta; ตารางอ่านได้เฉพาะ operator ที่อนุมัติแล้ว เขียนได้เฉพาะ service role
+- ดูผล: `select received_at, outcome, http_status, entries, events, detail from chat_webhook_events order by received_at desc limit 20;`

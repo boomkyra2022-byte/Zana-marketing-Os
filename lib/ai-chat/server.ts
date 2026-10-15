@@ -5,6 +5,13 @@ import { canReadSetupWithoutMigration, missingChatSchema } from './issues';
 
 export class ChatError extends Error {constructor(public code:string,public status=400){super(code);}}
 export function checked<T extends {error:unknown}>(result:T):T {if(result.error) throw new ChatError('CHAT_DATABASE_ERROR',503);return result;}
+// Best-effort webhook diagnostics row (migration 0030). Must NEVER change how the
+// webhook answers Meta: every failure here is swallowed.
+export async function recordWebhook(e:{outcome:string;status:number;bytes?:number;hasSig?:boolean;ua?:string|null;entries?:number;events?:number;detail?:string}):Promise<void> {
+  try {
+    await createServiceRoleClient().rpc('chat_log_webhook',{p_outcome:e.outcome,p_status:e.status,p_bytes:e.bytes??null,p_has_sig:e.hasSig??null,p_ua:e.ua??null,p_entries:e.entries??null,p_events:e.events??null,p_detail:e.detail??null});
+  } catch { /* diagnostics only */ }
+}
 export async function getRules(db:ReturnType<typeof createServiceRoleClient>):Promise<Rules> {
   const {data}=checked(await db.from('settings').select('value').eq('key','ai_chat').maybeSingle());
   return rulesSchema.parse(data?.value||defaults);
