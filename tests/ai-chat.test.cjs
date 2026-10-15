@@ -62,6 +62,38 @@ test('Actual generation retains specific invalid_api_key cause for human handoff
   try{global.fetch=async()=>new Response(JSON.stringify({error:{code:'invalid_api_key',message:'sk-secret-value'}}),{status:401});await assert.rejects(()=>analyzeChat('test-model',{text:'hello',history:[],summary:'',memory:[],sources:[]}),e=>e.message==='OPENAI_INVALID_API_KEY');}finally{global.fetch=original;}
 });
 
+const SECRET_TEXT='SECRET CUSTOMER MESSAGE';
+test('Webhook diagnostics describe payload SHAPE for a real message without leaking content',()=>{
+  const real={object:'page',entry:[{id:'111',time:1,messaging:[{sender:{id:'u1'},recipient:{id:'111'},timestamp:1,message:{mid:'m1',text:SECRET_TEXT}}]}]};
+  const shape=meta.describeEnvelope(real,'111');
+  assert.deepEqual(shape,{entries:1,pageMatch:true,entryIds:['111'],entryKeys:['messaging'],eventKinds:['message']});
+  assert.ok(!meta.formatEnvelope(shape).includes(SECRET_TEXT));
+  assert.equal(meta.formatEnvelope(shape),'ids=111; page_match=true; entry_keys=messaging; kinds=message');
+});
+test('Webhook diagnostics tell the dashboard Test shape, standby delivery, delivery/read and a wrong Page apart',()=>{
+  const dash=meta.describeEnvelope({object:'page',entry:[{id:'0',time:1,changes:[{field:'messages',value:{message:{text:SECRET_TEXT}}}]}]},'111');
+  assert.deepEqual([dash.pageMatch,dash.entryIds,dash.entryKeys,dash.eventKinds],[false,['0'],['changes'],['changes:messages']]);
+  // Secondary receiver (another app owns the thread): events arrive under `standby`, not `messaging`.
+  const standby=meta.describeEnvelope({object:'page',entry:[{id:'111',time:1,standby:[{sender:{id:'u'},recipient:{id:'111'},timestamp:1,message:{mid:'m',text:SECRET_TEXT}}]}]},'111');
+  assert.deepEqual([standby.pageMatch,standby.entryKeys,standby.eventKinds],[true,['standby'],['message']]);
+  const receipts=meta.describeEnvelope({object:'page',entry:[{id:'111',messaging:[{sender:{id:'u'},recipient:{id:'111'},timestamp:1,delivery:{}},{sender:{id:'u'},recipient:{id:'111'},timestamp:2,read:{}}]}]},'111');
+  assert.deepEqual(receipts.eventKinds,['delivery','read']);
+  assert.equal(meta.describeEnvelope({object:'page',entry:[{id:'222',messaging:[]}]},'111').pageMatch,false);
+});
+test('Webhook diagnostics never throw on malformed payloads',()=>{
+  for(const bad of [null,undefined,'text',42,[],{},{entry:'no'},{entry:[null,5,'x',{}]}]) assert.doesNotThrow(()=>meta.describeEnvelope(bad,'111'));
+  assert.equal(meta.describeEnvelope({entry:[null,5,'x']},'111').pageMatch,false);
+});
+test('Webhook parse errors are summarized by schema path/code and never quote the body',()=>{
+  let schemaErr;try{meta.receiveMessage({object:'page',entry:[{id:5}]},'111');}catch(e){schemaErr=e;}
+  assert.match(meta.describeParseError(schemaErr),/entry\.0\.id:invalid_type/);
+  let jsonErr;try{JSON.parse('{"text":"'+SECRET_TEXT+'" oops');}catch(e){jsonErr=e;}
+  assert.equal(meta.describeParseError(jsonErr),'PARSE_ERROR');
+  assert.ok(!meta.describeParseError(jsonErr).includes(SECRET_TEXT));
+  let tsErr;try{meta.receiveMessage({object:'page',entry:[{id:'111',messaging:[{sender:{id:'u'},recipient:{id:'111'},message:{mid:'m',text:'x'}}]}]},'111');}catch(e){tsErr=e;}
+  assert.equal(meta.describeParseError(tsErr),'MISSING_TIMESTAMP');
+});
+
 // Optional real Postgres-in-WASM integration suite. Set PGLITE_MODULE to an external QA installation.
 test('Migration + queue + takeover + scoring + RLS integration', {skip:!process.env.PGLITE_MODULE},async t=>{
   const {PGlite}=require(process.env.PGLITE_MODULE);const db=new PGlite();
@@ -75,6 +107,7 @@ test('Migration + queue + takeover + scoring + RLS integration', {skip:!process.
     insert into settings values('ai_chat','{}'),('ai','{}');
     grant usage on schema public,auth to anon,authenticated,service_role;`);
   await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/0029_ai_sales_chat.sql'),'utf8'));
+  await db.exec(fs.readFileSync(path.join(__dirname,'../supabase/migrations/0030_chat_webhook_events.sql'),'utf8'));
   const scalar=async(sql,args=[])=>Object.values((await db.query(sql,args)).rows[0])[0];
   const ingest=async(sender,mid,text='hello')=>scalar('select chat_ingest($1::jsonb,true)',[JSON.stringify({page_id:'page',sender_id:sender,mid,text,timestamp:new Date().toISOString(),attachments:[]})]);
   const claim=()=>scalar('select chat_claim()');
@@ -94,6 +127,24 @@ test('Migration + queue + takeover + scoring + RLS integration', {skip:!process.
     await t.test('RLS denies pending users and direct browser mutations/RPC',async()=>{await db.exec(`insert into profiles values('00000000-0000-4000-8000-000000000003','owner','pending');set role authenticated;set request.jwt.claim.sub='00000000-0000-4000-8000-000000000003';`);assert.equal(Number(await scalar('select count(*) from chat_customers')),0);await assert.rejects(()=>db.exec("insert into chat_customers(page_id,external_customer_id) values('x','x')"),/permission denied/);await assert.rejects(()=>db.exec('select chat_claim()'),/permission denied/);await db.exec(`set request.jwt.claim.sub='${operator}';`);assert.equal(Number(await scalar('select count(*) from chat_customers')),1);await db.exec('reset role');});
     await t.test('New settings restriction protects chat key without changing older settings',async()=>{await db.exec("set role authenticated;set request.jwt.claim.sub='00000000-0000-4000-8000-000000000003';");assert.equal(Number(await scalar("select count(*) from settings where key='ai_chat'")),0);assert.equal(Number(await scalar("select count(*) from settings where key='ai'")),1);await db.exec(`set request.jwt.claim.sub='${operator}';`);assert.equal(Number(await scalar("select count(*) from settings where key='ai_chat'")),1);await db.exec('reset role');});
     await t.test('Stale sending becomes uncertain and is not resent',async()=>{await ingest('b','mid-b');const j=await claim();const rev=await scalar('select revision from chat_conversations where id=$1',[j.conversation_id]);await analyze(j,rev);await finish(j);const out=await claim();await scalar('select chat_reserve_send($1,$2,true)',[out.id,out.lease_token]);await db.query("update chat_jobs set locked_at=now()-interval '3 minutes' where id=$1",[out.id]);await db.query("update chat_conversations set lease_until=now()-interval '1 minute' where id=$1",[out.conversation_id]);assert.equal(await claim(),null);assert.equal(await scalar('select delivery_status from chat_messages where id=$1',[out.message_id]),'uncertain');assert.equal(await scalar('select state from chat_jobs where id=$1',[out.id]),'failed');});
+    await t.test('Webhook diagnostics: caps anonymous outcomes, truncates, and stays service-only',async()=>{
+      const log=(o,s=200,d=null)=>scalar('select chat_log_webhook($1,$2,10,true,$3,1,0,$4)',[o,s,'facebookexternalua',d]);
+      const count=o=>scalar('select count(*) from chat_webhook_events where outcome=$1',[o]).then(Number);
+      for(let i=0;i<25;i++) await log('INVALID_SIGNATURE',401);
+      assert.equal(await count('INVALID_SIGNATURE'),10,'unauthenticated outcome must be capped per minute');
+      for(let i=0;i<25;i++) await log('OK',200,'ids=111; page_match=true');
+      assert.equal(await count('OK'),25,'validly signed outcomes are never capped');
+      await log('Y'.repeat(100),200,'d'.repeat(900));
+      assert.equal(await scalar("select max(length(outcome)) from chat_webhook_events where outcome like 'YYY%'"),40);
+      assert.equal(await scalar("select max(length(detail)) from chat_webhook_events"),500);
+      await db.exec("insert into profiles values('00000000-0000-4000-8000-000000000004','viewer','approved') on conflict do nothing;set role authenticated;set request.jwt.claim.sub='00000000-0000-4000-8000-000000000004';");
+      assert.equal(Number(await scalar('select count(*) from chat_webhook_events')),0,'non-operators cannot read diagnostics');
+      await db.exec(`set request.jwt.claim.sub='${operator}';`);
+      assert.ok(Number(await scalar('select count(*) from chat_webhook_events'))>0,'operators can read diagnostics');
+      await assert.rejects(()=>db.exec("insert into chat_webhook_events(outcome) values('x')"),/permission denied/);
+      await assert.rejects(()=>db.exec("select chat_log_webhook('x',1,1,true,'ua',1,1,'d')"),/permission denied/);
+      await db.exec('reset role');
+    });
     await t.test('Analytics aggregate executes and does not fabricate revenue',async()=>{const a=await scalar('select chat_analytics()');assert.equal(a.total,2);assert.equal('revenue' in a,false);});
   }finally{await db.close();}
 });

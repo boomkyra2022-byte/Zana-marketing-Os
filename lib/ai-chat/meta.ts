@@ -28,6 +28,41 @@ export function receiveMessage(payload:unknown,pageId:string):Inbound[] {
   }
   return events;
 }
+
+// Webhook diagnostics (see supabase/migrations/0030). Describes the SHAPE of a
+// validly signed payload — Page ids and key names only, never message text,
+// names, tokens or attachment URLs — so a rejected/ignored delivery can be
+// explained afterwards (wrong Page id? events arriving as `standby`? the
+// dashboard "Test" shape with `changes`?).
+export type EnvelopeShape = { entries:number; pageMatch:boolean; entryIds:string[]; entryKeys:string[]; eventKinds:string[] };
+export function describeEnvelope(payload:unknown,pageId:string):EnvelopeShape {
+  const out:EnvelopeShape={entries:0,pageMatch:false,entryIds:[],entryKeys:[],eventKinds:[]};
+  const entries=(payload&&typeof payload==='object'&&Array.isArray((payload as {entry?:unknown}).entry))?(payload as {entry:unknown[]}).entry:[];
+  out.entries=entries.length;
+  const keys=new Set<string>(),kinds=new Set<string>();
+  for(const raw of entries.slice(0,20)) {
+    if(!raw||typeof raw!=='object') continue;
+    const e=raw as Record<string,unknown>;
+    if(out.entryIds.length<3) out.entryIds.push(String(e.id??'').slice(0,30));
+    if(String(e.id)===pageId) out.pageMatch=true;
+    for(const k of Object.keys(e)) if(k!=='id'&&k!=='time') keys.add(k.slice(0,30));
+    const list=[...(Array.isArray(e.messaging)?e.messaging:[]),...(Array.isArray(e.standby)?e.standby:[])];
+    for(const m of list.slice(0,50)) if(m&&typeof m==='object') for(const k of Object.keys(m)) if(!['sender','recipient','timestamp'].includes(k)) kinds.add(k.slice(0,30));
+    if(Array.isArray(e.changes)) for(const c of e.changes.slice(0,20)) if(c&&typeof (c as {field?:unknown}).field==='string') kinds.add('changes:'+String((c as {field:string}).field).slice(0,30));
+  }
+  out.entryKeys=[...keys].sort();out.eventKinds=[...kinds].sort();
+  return out;
+}
+export function formatEnvelope(s:EnvelopeShape):string {
+  return `ids=${s.entryIds.join(',')||'-'}; page_match=${s.pageMatch}; entry_keys=${s.entryKeys.join(',')||'-'}; kinds=${s.eventKinds.join(',')||'-'}`;
+}
+// Parse failures are summarized by schema path/code only: V8's JSON.parse
+// message can quote a fragment of the body, which could contain message text.
+export function describeParseError(error:unknown):string {
+  if(error instanceof z.ZodError) return error.issues.slice(0,5).map(i=>`${i.path.join('.')||'(root)'}:${i.code}`).join(' | ');
+  if(error instanceof Error&&error.message==='MISSING_TIMESTAMP') return 'MISSING_TIMESTAMP';
+  return 'PARSE_ERROR';
+}
 export class MetaError extends Error { constructor(public code:string,public uncertain=false){super(code);} }
 export class MetaMessengerService {
   receiveMessage=receiveMessage;
