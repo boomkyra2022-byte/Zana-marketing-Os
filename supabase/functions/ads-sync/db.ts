@@ -10,6 +10,114 @@ export { getServiceClient } from '../_shared/supabase-client.ts';
 export { getActiveAdAccounts, resolveTokenForAccount } from '../_shared/accounts.ts';
 export type { AdAccountRow } from '../_shared/accounts.ts';
 
+import type { DiscoveredAccount } from './parse.ts';
+
+// Records this run's outcome on the account row itself so the UI can show,
+// per account, whether it is connected and why not. Diagnostics only: it must
+// never fail a sync, so every error is swallowed (and logged without secrets).
+export async function recordAccountResult(
+  client: ServiceClient,
+  accountId: string,
+  result:
+    | { ok: true; checkedAt: string; info?: DiscoveredAccount }
+    | { ok: false; checkedAt: string; errorCode: number | null; errorText: string }
+): Promise<void> {
+  const patch: Record<string, unknown> = { last_sync_at: result.checkedAt };
+  if (result.ok) {
+    patch.last_sync_ok = true;
+    patch.last_ok_at = result.checkedAt;
+    patch.last_error_code = null;
+    patch.last_error_text = null;
+    if (result.info) {
+      patch.meta_name = result.info.name;
+      patch.meta_account_status = result.info.account_status;
+      patch.currency = result.info.currency;
+      patch.timezone_name = result.info.timezone_name;
+      patch.business_id = result.info.business_id;
+      patch.business_name = result.info.business_name;
+      patch.meta_checked_at = result.checkedAt;
+    }
+  } else {
+    patch.last_sync_ok = false;
+    patch.last_error_code = result.errorCode;
+    patch.last_error_text = result.errorText;
+  }
+  try {
+    const { error } = await client.from('ad_accounts').update(patch).eq('id', accountId);
+    if (error) console.error(`[ads-sync] recordAccountResult ${accountId}: ${error.message}`);
+  } catch (err) {
+    console.error(`[ads-sync] recordAccountResult ${accountId}: ${(err as Error).message}`);
+  }
+}
+
+// Registers accounts a token can reach but nobody has added yet. New rows are
+// created as status='paused' + source='discovered' (so ads-sync does NOT pull
+// their data until a person enables them) and remember which Vault secret
+// found them, so enabling later uses the right token. Rows that already exist
+// only get their Meta-reported fields refreshed, never name/status/token.
+export async function upsertDiscovered(
+  client: ServiceClient,
+  found: DiscoveredAccount[],
+  tokenSecretName: string | null,
+  checkedAt: string
+): Promise<{ inserted: number; refreshed: number }> {
+  if (found.length === 0) return { inserted: 0, refreshed: 0 };
+
+  const { data: existing, error } = await client
+    .from('ad_accounts')
+    .select('meta_account_id, meta_name, meta_account_status, business_name, source')
+    .in(
+      'meta_account_id',
+      found.map((f) => f.id)
+    );
+  if (error) throw new Error(`upsertDiscovered lookup: ${error.message}`);
+  const byId = new Map((existing ?? []).map((row: { meta_account_id: string }) => [row.meta_account_id, row]));
+
+  const fresh = found.filter((f) => !byId.has(f.id));
+  if (fresh.length > 0) {
+    const { error: insertError } = await client.from('ad_accounts').upsert(
+      fresh.map((f) => ({
+        meta_account_id: f.id,
+        name: f.name ?? f.id,
+        meta_name: f.name,
+        meta_account_status: f.account_status,
+        currency: f.currency,
+        timezone_name: f.timezone_name,
+        business_id: f.business_id,
+        business_name: f.business_name,
+        status: 'paused',
+        source: 'discovered',
+        meta_token_secret_name: tokenSecretName,
+        meta_checked_at: checkedAt
+      })),
+      { onConflict: 'meta_account_id', ignoreDuplicates: true }
+    );
+    if (insertError) throw new Error(`upsertDiscovered insert: ${insertError.message}`);
+  }
+
+  let refreshed = 0;
+  for (const f of found) {
+    const row = byId.get(f.id) as
+      | { meta_name: string | null; meta_account_status: number | null; business_name: string | null }
+      | undefined;
+    if (!row) continue;
+    if (row.meta_name === f.name && row.meta_account_status === f.account_status && row.business_name === f.business_name) continue;
+    const { error: updateError } = await client
+      .from('ad_accounts')
+      .update({
+        meta_name: f.name,
+        meta_account_status: f.account_status,
+        business_id: f.business_id,
+        business_name: f.business_name,
+        currency: f.currency,
+        meta_checked_at: checkedAt
+      })
+      .eq('meta_account_id', f.id);
+    if (!updateError) refreshed += 1;
+  }
+  return { inserted: fresh.length, refreshed };
+}
+
 // Upserts campaigns/ad sets discovered this run, returns id maps keyed by
 // the Meta-side id so the insight snapshot insert can resolve local uuids.
 export async function upsertCampaignsAndAdSets(
