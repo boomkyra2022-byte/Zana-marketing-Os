@@ -16,6 +16,10 @@ export default async function SettingsPage() {
         <p className="text-gray-500">ตั้งค่า AI provider, ขีดจำกัดการ generate, และ threshold ของ Creative Score</p>
       </div>
 
+      <div className="card p-5 flex flex-wrap items-center justify-between gap-3">
+        <div><h2 className="text-lg font-semibold">AI Sales Chat</h2><p className="text-sm text-gray-500">ตั้งค่ารุ่น AI, Lead Score และกฎส่งต่อแอดมินสำหรับ Messenger</p></div>
+        <Link href="/ai-chat?tab=rules" className="btn-secondary">ตั้งค่า AI Chat →</Link>
+      </div>
       <form action={saveAiSettings} className="card p-5 space-y-4">
         <h2 className="text-lg font-semibold">AI</h2>
         <div className="grid grid-cols-2 gap-4">

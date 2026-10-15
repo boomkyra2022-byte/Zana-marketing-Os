@@ -250,7 +250,7 @@ input[type='radio'] {
    colors reappear as full card tints on the Dashboard quadrants below. */
 .sidebar-group-intelligence .sidebar-group-label { color: var(--accent-intelligence); border-left: 2px solid var(--accent-intelligence); padding-left: 0.6rem; margin-left: 0.15rem; }
 .sidebar-group-strategy .sidebar-group-label { color: var(--accent-strategy); border-left: 2px solid var(--accent-strategy); padding-left: 0.6rem; margin-left: 0.15rem; }
-.sidebar-group-distribution .sidebar-group-label { color: var(--accent-distribution); border-left: 2px solid var(--accent-distribution); padding-left: 0.6rem; margin-left: 0.15rem; }
+.sidebar-group-sales .sidebar-group-label, .sidebar-group-distribution .sidebar-group-label { color: var(--accent-distribution); border-left: 2px solid var(--accent-distribution); padding-left: 0.6rem; margin-left: 0.15rem; }
 .sidebar-group-analytics .sidebar-group-label { color: var(--accent-analytics); border-left: 2px solid var(--accent-analytics); padding-left: 0.6rem; margin-left: 0.15rem; }
 
 /* Light-surface card variant — Dashboard quadrant cards */
