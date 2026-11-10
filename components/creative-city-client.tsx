@@ -10,7 +10,8 @@
 // Styles live in ./creative-city.css, all scoped under `.cc` so they can't
 // leak into the rest of the app shell.
 
-import { useRef, useState, type KeyboardEvent, type SVGProps } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type SVGProps } from 'react';
+import { WarehouseMap } from '@/components/creative-warehouse';
 import {
   CX,
   CY,
@@ -24,6 +25,8 @@ import {
 import './creative-city.css';
 
 type P = SVGProps<SVGElement>;
+type View = 'warehouse' | 'city';
+const VIEW_KEY = 'cc-view';
 
 const LINE_C = 'var(--cc-line)';
 const wallAttr = (s: Station): P => ({ fill: `var(--cc-w${s.w})`, stroke: LINE_C, strokeWidth: 3, strokeLinejoin: 'round' });
@@ -311,6 +314,33 @@ export function CreativeCityClient() {
   const [selectedId, setSelectedId] = useState(STATIONS[0].id);
   const panelRef = useRef<HTMLElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<View>('warehouse');
+  // Walkers only move after mount (keeps SSR markup identical) and never
+  // for viewers who asked for reduced motion.
+  const [animate, setAnimate] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(VIEW_KEY);
+      if (saved === 'city' || saved === 'warehouse') setView(saved);
+    } catch {
+      /* storage blocked — keep default */
+    }
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const sync = () => setAnimate(!mq.matches);
+    sync();
+    mq.addEventListener('change', sync);
+    return () => mq.removeEventListener('change', sync);
+  }, []);
+
+  const changeView = (v: View) => {
+    setView(v);
+    try {
+      window.localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* ignore */
+    }
+  };
 
   const idx = STATIONS.findIndex((s) => s.id === selectedId);
   const s = STATIONS[idx];
@@ -339,9 +369,23 @@ export function CreativeCityClient() {
           <div className="cc-eyebrow">JANGZANA Creative Factory</div>
           <h1>ZANA Creative City</h1>
           <p className="cc-lead">
-            เมืองผลิตคลิปโฆษณา 10 สถานี งานเดินตามถนนวงแหวนตามเข็มนาฬิกา แล้วผลแอดวนกลับเข้าศาลากลางไปเริ่มรอบใหม่
-            สถานี 5 แยกเป็น 2 ตำแหน่ง A (AI) กับ B (คน) เพื่อแข่งวัดผลกัน แตะอาคารเพื่อดูหน้าที่ของแต่ละทีม
+            {view === 'warehouse'
+              ? 'โกดังผลิตคลิปโฆษณา 10 สถานี Agent ขนงานไปตามสายพานจาก Scout ถึงห้อง CEO แล้ววนกลับไปเริ่มรอบใหม่'
+              : 'เมืองผลิตคลิปโฆษณา 10 สถานี งานเดินตามถนนวงแหวนตามเข็มนาฬิกา แล้วผลแอดวนกลับเข้าศาลากลางไปเริ่มรอบใหม่'}{' '}
+            สถานี 5 แยกเป็น 2 ตำแหน่ง A (AI) กับ B (คน) เพื่อแข่งวัดผลกัน แตะแต่ละจุดเพื่อดูหน้าที่ของทีม
           </p>
+          <div className="cc-views" role="group" aria-label="มุมมอง">
+            {(
+              [
+                ['warehouse', 'โกดัง'],
+                ['city', 'แผนที่เมือง']
+              ] as const
+            ).map(([v, label]) => (
+              <button key={v} type="button" className={view === v ? 'on' : ''} aria-pressed={view === v} onClick={() => changeView(v)}>
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="cc-row" aria-label="แบรนด์">
             <span className="cc-chip on">ZANA น้ำหอมเด็ก · pilot</span>
             <span className="cc-chip ghost">แบรนด์ถัดไป: เปิดหลัง pilot ผ่าน</span>
@@ -358,13 +402,26 @@ export function CreativeCityClient() {
 
         <div className="cc-grid" ref={gridRef}>
           <div className="cc-mapbox">
-            <CityMap selected={selectedId} onSelect={(id) => select(id, true)} />
-            <div className="cc-legend">
-              <span><Mark status="ok" />พร้อมใช้</span>
-              <span><Mark status="todo" />รอสร้าง</span>
-              <span><Mark status="human" />คนทำ</span>
-              <span><i className="cc-dash" aria-hidden="true" />ผลแอดวนกลับไปรอบใหม่</span>
-            </div>
+            {view === 'warehouse' ? (
+              <WarehouseMap selected={selectedId} onSelect={(id) => select(id, true)} animate={animate} />
+            ) : (
+              <CityMap selected={selectedId} onSelect={(id) => select(id, true)} />
+            )}
+            {view === 'warehouse' ? (
+              <div className="cc-legend">
+                <span><i className="cc-lg-aura" aria-hidden="true" />Agent มีออร่า = AI ทำงานอยู่</span>
+                <span><Mark status="human" />คนทำ</span>
+                <span><i className="cc-lg-ghost" aria-hidden="true" />ช่องลายเตือน = รอสร้าง</span>
+                <span><i className="cc-lg-belt" aria-hidden="true" />Agent ขนงานตามสายพาน วนกลับ Scout</span>
+              </div>
+            ) : (
+              <div className="cc-legend">
+                <span><Mark status="ok" />พร้อมใช้</span>
+                <span><Mark status="todo" />รอสร้าง</span>
+                <span><Mark status="human" />คนทำ</span>
+                <span><i className="cc-dash" aria-hidden="true" />ผลแอดวนกลับไปรอบใหม่</span>
+              </div>
+            )}
           </div>
 
           <div className="cc-side">
