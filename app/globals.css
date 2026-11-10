@@ -5,7 +5,7 @@
    for a Thai-first app, independent of matching anyone's specific brand.
    Must stay the very first rule in this file — @import is only valid
    before any other CSS statement (including @tailwind). */
-@import url('https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=Sarabun:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=Mitr:wght@400;500;600&family=Sarabun:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;

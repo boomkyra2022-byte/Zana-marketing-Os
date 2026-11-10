@@ -48,6 +48,8 @@ export const NAV_GROUPS: NavGroup[] = [
     label: '02 · Strategy',
     slug: 'strategy',
     items: [
+      // Creative Factory pipeline map (handoff §8.1, 10 Nov 2026).
+      { href: '/creative-city', label: 'Creative City' },
       { href: '/creative-generator', label: 'Creative Generator' },
       { href: '/content-library', label: 'Content Library' },
       { href: '/flow-prompt', label: 'Flow Prompt Director' },
