@@ -12,6 +12,44 @@ export class AIProviderError extends Error {
   }
 }
 
+// Turns a non-OK OpenAI HTTP response into a user-facing Thai message.
+// The raw response body (JSON from OpenAI) is logged server-side only —
+// never shown to the user (e.g. Content Studio used to surface the full
+// "invalid_api_key" JSON when the key expired).
+export async function toProviderError(res: Response, context = 'OpenAI'): Promise<AIProviderError> {
+  let errText = '';
+  try {
+    errText = await res.text();
+  } catch {
+    // body unreadable — status alone is enough
+  }
+  console.error(`[${context}] HTTP ${res.status}:`, errText.slice(0, 2000));
+
+  const status = res.status;
+  if (status === 401) {
+    return new AIProviderError('OpenAI API key หมดอายุหรือไม่ถูกต้อง — อัปเดต OPENAI_API_KEY ใน Vercel แล้ว Redeploy', 502);
+  }
+  if (status === 429) {
+    return new AIProviderError('เครดิต OpenAI หมดหรือเรียกถี่เกินไป', 429);
+  }
+  if (status >= 500) {
+    return new AIProviderError('OpenAI ขัดข้องชั่วคราว ลองใหม่', 503);
+  }
+
+  // Other 4xx: show OpenAI's human-readable message (if any), not the JSON.
+  let detail = '';
+  try {
+    const parsed = JSON.parse(errText);
+    if (typeof parsed?.error?.message === 'string') detail = parsed.error.message;
+  } catch {
+    // not JSON
+  }
+  return new AIProviderError(
+    detail ? `${context} ปฏิเสธคำขอ (${status}): ${detail.slice(0, 200)}` : `${context} ปฏิเสธคำขอ (${status})`,
+    502
+  );
+}
+
 // Settings → AI → "Model" used to be saved to the `settings` table but never
 // read by any AI call (every route fell through to AI_MODEL / gpt-4o-mini),
 // i.e. a dead field. User asked 2026-09-24 "ตั้งค่า Model ได้ไหม" — wired here
@@ -96,8 +134,7 @@ export async function callOpenAIJSON(opts: {
   }
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new AIProviderError(`AI provider error (${res.status}): ${errText.slice(0, 400)}`, 502);
+    throw await toProviderError(res, 'OpenAI');
   }
 
   const json = await res.json();
@@ -154,8 +191,7 @@ export async function callOpenAIVisionJSON(opts: {
   }
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new AIProviderError(`AI provider error (${res.status}): ${errText.slice(0, 400)}`, 502);
+    throw await toProviderError(res, 'OpenAI');
   }
 
   const json = await res.json();
@@ -199,8 +235,7 @@ export async function transcribeAudio(opts: { fileBuffer: Buffer; filename: stri
   }
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new AIProviderError(`Transcription error (${res.status}): ${errText.slice(0, 400)}`, 502);
+    throw await toProviderError(res, 'OpenAI Transcription');
   }
 
   const json = await res.json();
@@ -266,8 +301,7 @@ export async function generateSpeech(opts: {
   }
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new AIProviderError(`สร้างเสียงพากย์ไม่สำเร็จ (${res.status}): ${errText.slice(0, 400)}`, 502);
+    throw await toProviderError(res, 'OpenAI TTS');
   }
 
   const contentTypeMap: Record<string, string> = {
@@ -329,8 +363,7 @@ export async function transcribeAudioWithTimestamps(opts: {
   }
 
   if (!res.ok) {
-    const errText = await res.text();
-    throw new AIProviderError(`Transcription error (${res.status}): ${errText.slice(0, 400)}`, 502);
+    throw await toProviderError(res, 'OpenAI Transcription');
   }
 
   const json = await res.json();
