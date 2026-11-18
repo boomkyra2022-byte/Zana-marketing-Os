@@ -530,7 +530,7 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
                         </div>
                         <h4 className="font-semibold">{d.title}</h4>
                         <Retention r={d.retention} />
-                        <textarea rows={10} aria-label="แก้ข้อความ" value={d.body} onChange={(e) => setDrafts((ds) => ds.map((x, j) => (j === i ? { ...x, body: e.target.value } : x)))} />
+                        <textarea rows={STUDIO_FORMATS.find((x) => x.id === d.format)?.single ? 22 : 10} aria-label="แก้ข้อความ" value={d.body} onChange={(e) => setDrafts((ds) => ds.map((x, j) => (j === i ? { ...x, body: e.target.value } : x)))} />
                         <div className="flex gap-2 flex-wrap">
                           <button type="button" className="btn-secondary" onClick={() => copy(d.body)}>
                             คัดลอก
