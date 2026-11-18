@@ -98,7 +98,7 @@ function weekStart(now: number) {
   return Date.UTC(bkk.getUTCFullYear(), bkk.getUTCMonth(), bkk.getUTCDate() - back) - 7 * 3600e3;
 }
 
-function weekInfo(posts: StudioPost[], drafts: { format: string }[], now: number): SalonWeek {
+function weekInfo(posts: StudioPost[], drafts: { format: string }[], now: number): Omit<SalonWeek, 'auto'> {
   const start = weekStart(now);
   const since = (iso: string | null | undefined) => !!iso && Date.parse(iso) >= start;
   const brief = posts.find((p) => p.format === 'brief_week' && since(p.created_at));
@@ -190,7 +190,7 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     libUsed: clientPosts.filter((p) => p.status === 'used').length,
     unsaved: drafts.filter((d) => !d.saved).length,
     research: !!fmtObj?.research,
-    week: weekInfo(clientPosts, drafts, nowMs),
+    week: { ...weekInfo(clientPosts, drafts, nowMs), auto: !!client?.weekly_auto },
     avgScore: scored.length ? Math.round((scored.reduce((a, d) => a + (d.retention?.score ?? 0), 0) / scored.length) * 10) / 10 : null
   };
   useEffect(() => {
@@ -322,6 +322,20 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     } catch (e: any) {
       setErr(e.message);
       salon.fail(e.message);
+    }
+    setBusy(null);
+  }
+
+  async function toggleAuto(on: boolean) {
+    if (!client) return;
+    setBusy('auto');
+    setErr('');
+    try {
+      const { client: c } = await api<{ client: StudioClient }>('/api/content-studio/clients', 'PATCH', { id: client.id, weekly_auto: on });
+      setClients((cs) => cs.map((x) => (x.id === c.id ? c : x)));
+      flash(on ? 'เปิดแล้ว: ทุกวันจันทร์ 08:00 ระบบจะหาข่าว + ทำ Creative Brief เก็บไว้ในคลัง' : 'ปิดการทำบรีฟอัตโนมัติแล้ว');
+    } catch (e: any) {
+      setErr(e.message);
     }
     setBusy(null);
   }
@@ -512,9 +526,15 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
                     <p className="text-sm mt-1 text-amber-700">ยังไม่มีจุดยืนคอนเทนต์ — เติมใน Brand Card เพื่อให้ทุกชิ้นไปทางเดียวกัน</p>
                   )}
                 </div>
-                <button type="button" className="btn-secondary" onClick={() => openForm(client)}>
-                  แก้ Brand Card
-                </button>
+                <div className="flex flex-col items-end gap-2">
+                  <button type="button" className="btn-secondary" onClick={() => openForm(client)}>
+                    แก้ Brand Card
+                  </button>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer" title="ทุกเช้า 08:00 ถ้าสัปดาห์นี้ยังไม่มีบรีฟ ระบบจะหาข่าว + ทำ Creative Brief เก็บเป็นร่างในคลัง (ใช้เครดิต OpenAI)">
+                    <input type="checkbox" checked={!!client.weekly_auto} disabled={busy === 'auto'} onChange={(e) => toggleAuto(e.target.checked)} />
+                    หาข่าว + ทำบรีฟอัตโนมัติ (จันทร์ 08:00)
+                  </label>
+                </div>
               </div>
               <div className="flex gap-1 border-b border-[var(--border)] mt-4 overflow-x-auto">
                 {tabBtn('create', 'สร้างคอนเทนต์')}

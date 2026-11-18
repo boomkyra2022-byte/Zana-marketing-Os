@@ -10,7 +10,7 @@ const PENDING_APPROVAL_PATH = '/pending-approval';
 
 export async function middleware(request: NextRequest) {
   // Exact service endpoints verify their own HMAC / bearer secret. Never bypass the operator API.
-  if (['/api/integrations/meta/webhook', '/api/ai-chat/worker'].includes(request.nextUrl.pathname)) {
+  if (['/api/integrations/meta/webhook', '/api/ai-chat/worker', '/api/cron/content-studio-weekly'].includes(request.nextUrl.pathname)) {
     return NextResponse.next();
   }
   let response = NextResponse.next({ request: { headers: request.headers } });
