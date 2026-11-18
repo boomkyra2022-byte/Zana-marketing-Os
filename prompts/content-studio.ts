@@ -30,6 +30,7 @@ export interface StudioFormat {
   group: 'post' | 'video' | 'viral' | 'plan' | 'tool';
   spec: string;
   single?: boolean; // one deliverable per call (lists/plans)
+  research?: boolean; // Trend Scout searches the web first (trends + upcoming dates, with links)
 }
 
 export const STUDIO_FORMATS: StudioFormat[] = [
@@ -65,24 +66,28 @@ export const STUDIO_FORMATS: StudioFormat[] = [
   // client's online storefront, so every week the shop team gets a brief of
   // what to shoot and sell, and the month is planned ahead. Weekly cadence
   // for now ("สัปดาห์ละ 1 ครั้งก่อน").
-  { id: 'brief_week', group: 'plan', name: 'บรีฟหน้าร้านประจำสัปดาห์', desc: 'ธีม ลาย/สี ช็อตที่ต้องถ่าย และประโยคขายหน้าร้าน ส่งทีมร้าน', single: true,
+  { id: 'brief_week', group: 'plan', name: 'Creative Brief หน้าร้าน', desc: 'AI ค้นเทรนด์ + วันสำคัญจริงพร้อมลิงก์ แล้ววางธีมและโจทย์ถ่ายให้ทีมร้าน', single: true, research: true,
     spec: [
-      'บรีฟหน้าร้านประจำสัปดาห์ ส่งให้ทีมหน้าร้านของลูกค้า (เราเป็นผู้จัดการคอนเทนต์ออนไลน์ให้ร้าน) title = "บรีฟสัปดาห์ <วันที่เริ่ม>–<วันที่จบ>: <ธีม>" ใช้สัปดาห์ถัดไปนับจากวันนี้ (จันทร์–อาทิตย์) เป็นวันที่จริง',
-      'body แบ่งหัวข้อตามลำดับนี้:',
-      '1) ธีมสัปดาห์ + ทำไมต้องขายตอนนี้ (เทศกาล วันสำคัญ ฤดูกาล หรือช่วงเงินเดือนออกที่ตรงกับวันในสัปดาห์นั้นจริง)',
-      '2) ลายหรือสีแนะนำ 3 แบบ ใช้ได้เฉพาะบริการที่มีใน Brand Card บอกว่าเหมาะกับลูกค้าแบบไหน',
-      '3) สีตามความเชื่อ (ถ้าเข้ากับแบรนด์): สีมงคลประจำวันตามความเชื่อไทย หรือสีตามราศีที่ตรงช่วงวันนั้น เขียนว่า "ตามความเชื่อ" เสมอ ห้ามรับประกันผล เช่น ความรักดีขึ้นแน่นอน',
-      '4) รายการช็อตให้ทีมถ่าย 5–8 ช็อต: ถ่ายอะไร มุม แสงธรรมชาติ พร็อพ ภาพซูมรายละเอียด แนวตั้ง/แนวนอน และวันที่ต้องส่งรูปกลับ (ก่อนวันโพสต์แรก 1 วัน); เน้นงานจริงของร้าน ห้ามให้ใช้ภาพจากเน็ต',
-      '5) ประโยคเสนอขายหน้าร้าน 2–3 ประโยค ให้พนักงานพูดกับลูกค้าที่นั่งทำอยู่ ตามน้ำเสียงแบรนด์',
-      '6) โพสต์ที่จะได้จากรูปชุดนี้ 2–3 ชิ้น: วันโพสต์ + รูปแบบ + หัวข้อ',
-      '7) ต้องเช็กก่อนใช้: เทรนด์หรือสิ่งที่ "กำลังฮิต" ทุกข้อให้ติด [ต้องเช็ก] พร้อมบอกว่าดูที่ไหน (TikTok / IG / Pinterest) ห้ามอ้างว่าฮิตโดยไม่มีข้อมูล',
-      'ห้ามใส่ราคาหรือโปรที่ไม่มีในช่องโปร ห้ามแต่งรีวิว คิวว่าง หรือผลงานลูกค้า'
+      'Creative Brief ภาษาไทยให้ทีมหน้าร้าน: เราเป็นผู้จัดการคอนเทนต์ออนไลน์ของร้าน หน้าที่คือวางธีมและโจทย์ผลิตคอนเทนต์ ไม่ใช่แค่เขียนโพสต์ (ตอนนี้ทำสัปดาห์ละ 1 ครั้ง)',
+      'title = "Creative Brief <วันที่> : <ธีมหลัก>"',
+      'ใช้ข้อเท็จจริงจาก Brand Card เท่านั้น (บริการ ราคา โปร วันสำคัญของร้าน) เทรนด์และวันสำคัญใช้จาก <trend_research> และใส่ลิงก์ + วันที่ของแหล่งนั้นทุกครั้ง; ถ้าไม่มีแหล่งให้ติด [ต้องเช็ก]',
+      'body เรียงตามนี้:',
+      'A) สรุปเทรนด์และวันสำคัญที่ใช้ (3–6 ข้อ แต่ละข้อมีแหล่ง + ลิงก์ + วันที่)',
+      'B) ธีมหลัก 1 ธีม + ไอเดียสำรอง 2 ธีม; ห้ามซ้ำธีมใน <recent_themes> ถ้าไม่มีพัฒนาการใหม่',
+      'C) เลือก 1 ชิ้นที่จะลงภายใน 3 วัน และ 1 ชิ้นสะสมคลังผลงาน',
+      'D) ทุกไอเดีย (ธีมหลัก สำรอง 2 และ 2 ชิ้นที่เลือก) ระบุครบ: Stage (TOFU/MOFU/BOFU/Retention), Objective, Event, Hook, สี/ดีไซน์ที่ช่างต้องหยิบจากสต็อกจริง (ให้ร้านยืนยันชื่อเฉด), Proof ที่ต้องมี, ช็อต 9:16 และภาพนิ่งที่ต้องถ่าย, คำถามให้ช่างหรือเจ้าของตอบแบบธรรมชาติหน้ากล้อง, ข้อความสั้นบนภาพ, Caption direction, CTA ตามสถานะ (Banner ไม่มี CTA ถ้า Brand Card กำหนด), KPI, Owner, งานที่หน้าร้านต้องส่งกลับ (ภาพ/คลิป/ชื่อเฉด/ราคา/ใบยินยอมลูกค้า/เวลา), Deadline, สถานะยืนยัน (ยืนยันแล้ว / รอร้านยืนยัน)',
+      'E) แนวภาพอ้างอิง: บอร์ดไอเดียลายเล็บตามธีม, ภาพมือคู่พร็อพสีเดียวกับธีม, เซ็ตโทนสีแบบ "The ... Edit" — ใช้เป็นแนวทาง ห้ามคัดลอกงานหรือโลโก้ของเพจอื่น',
+      'F) บรีฟสั้นสำหรับคัดลอกส่งทีม (ไม่เกิน 12 บรรทัด)',
+      'G) KPI funnel: Qualified Lead → Confirmed Booking → Paid Sale → Contribution บอกว่าวัดจากอะไรตามข้อมูลที่มี ถ้ายังไม่มีข้อมูลให้บอกว่าต้องเก็บอะไร',
+      'ราศี วันเกิด หรือสีมงคล ให้เขียนชัดว่าเป็นความเชื่อ/ความสนุกในการเลือกสี ห้ามรับประกันว่าจะทำให้รักดีขึ้น เฮง หรือได้เงิน',
+      'ห้ามสร้างรีวิวปลอม ภาพผลงานปลอม ราคา โปร หรือคิวที่ไม่ยืนยัน; เราไม่โพสต์และไม่ส่งข้อความหาทีมเอง',
+      'จบด้วยบรรทัด "ส่งบรีฟให้หน้าร้านวันนี้" แล้วตามด้วย "Next action 24–72 ชั่วโมง" เป็นรายการ'
     ].join(' ') },
-  { id: 'plan30', group: 'plan', name: 'แผนคอนเทนต์ 30 วัน', desc: 'โพสต์วางล่วงหน้า + วันส่งบรีฟหน้าร้าน สัปดาห์ละครั้ง', single: true,
+  { id: 'plan30', group: 'plan', name: 'แผนคอนเทนต์ 30 วัน', desc: 'โพสต์วางล่วงหน้า + วันส่งบรีฟหน้าร้าน สัปดาห์ละครั้ง', single: true, research: true,
     spec: [
       'แผนคอนเทนต์ 30 วัน เริ่มพรุ่งนี้ ใช้วันที่จริงพร้อมชื่อวัน แบ่งเป็นสัปดาห์ที่ 1–4 (และวันที่เหลือ) title = "แผน <วันที่เริ่ม>–<วันที่จบ>"',
       'แต่ละสัปดาห์มี: (ก) ธีมสัปดาห์ + วันส่งบรีฟหน้าร้าน 1 วัน (ต้นสัปดาห์); (ข) โพสต์วางล่วงหน้า 3 ชิ้น ที่ทำได้โดยไม่ต้องใช้ภาพงานจริง เช่น แนะนำบริการ ราคาที่อยู่ในช่องโปร พิกัด FAQ การดูแลหลังทำ แต่ละชิ้นบอกวันที่ รูปแบบ หัวข้อ Hook; (ค) โพสต์จากรูปที่ทีมร้านถ่ายตามบรีฟ 2 ชิ้น พร้อมวันที่; (ง) สตอรี่รายวันสั้นๆ 1 บรรทัดต่อวัน เช่น สีมงคลวันนี้ตามความเชื่อ หรืองานที่เพิ่งทำเสร็จ',
-      'ผูกกับวันสำคัญและเทศกาลที่อยู่ในช่วง 30 วันนี้จริง และวันสำคัญของร้านถ้ามีใน Brand Card (เช่น วันเปิดร้าน) สัดส่วน Funnel ประมาณ ทำให้รู้จัก 4 : สร้างความเชื่อ 2 : ปิดการขาย 1',
+      'ผูกกับวันสำคัญและเทศกาลที่อยู่ในช่วง 30 วันนี้จริงจาก <trend_research> (ใส่ลิงก์) และวันสำคัญของร้านถ้ามีใน Brand Card (เช่น วันเปิดร้าน) สัดส่วน Funnel ประมาณ ทำให้รู้จัก 4 : สร้างความเชื่อ 2 : ปิดการขาย 1',
       'ปิดท้ายด้วย "สิ่งที่ต้องขอจากร้านเดือนนี้" (รูปจริง ข้อมูลยืนยัน ราคาเมนูล่าสุด) และ "ตัวชี้วัดที่ต้องดูทุกสัปดาห์" (ลายหรือบริการที่ลูกค้าทักถามมากสุด เพื่อใช้คิดบรีฟรอบถัดไป)',
       'ห้ามใส่ราคา โปร รีวิว หรือคิวว่างที่ไม่มีใน Brand Card; เทรนด์ให้ติด [ต้องเช็ก]'
     ].join(' ') },
@@ -144,6 +149,8 @@ export function buildContentStudioPrompt(opts: {
   topic: string;
   count: number;
   examples: StyleExample[];
+  research?: TrendResearch | null;
+  recentThemes?: string[];
 }): { system: string; user: string; count: number } {
   const fmt = STUDIO_FORMATS.find((f) => f.id === opts.formatId) ?? STUDIO_FORMATS[0];
   const funnel = STUDIO_FUNNEL.find((f) => f.id === opts.funnel) ?? STUDIO_FUNNEL[0];
@@ -164,6 +171,17 @@ export function buildContentStudioPrompt(opts: {
         opts.examples.map((x, i) => `--- ตัวอย่าง ${i + 1}: ${x.title}\n${x.body}`).join('\n') +
         '\n</style_examples>'
       : '',
+    fmt.research
+      ? opts.research
+        ? '<trend_research> (ผลค้นเว็บโดย Trend Scout วันนี้: ใช้เฉพาะสิ่งที่มีแหล่ง)\n' +
+          opts.research.text +
+          (opts.research.sources.length ? '\nแหล่งอ้างอิง:\n' + opts.research.sources.map((x) => `- ${x.title}: ${x.url}`).join('\n') : '') +
+          '\n</trend_research>'
+        : '<trend_research>ค้นเว็บไม่สำเร็จรอบนี้ — ทุกเทรนด์และวันสำคัญให้ติด [ต้องเช็ก]</trend_research>'
+      : '',
+    fmt.research && opts.recentThemes?.length
+      ? '<recent_themes> (บรีฟ/แผนที่ทำไปแล้วใน 7 วันล่าสุด)\n' + opts.recentThemes.map((t) => `- ${t}`).join('\n') + '\n</recent_themes>'
+      : '',
     '<instructions>',
     'รูปแบบ: ' + fmt.spec,
     'ขั้น Funnel: ' + funnel.spec,
@@ -177,6 +195,33 @@ export function buildContentStudioPrompt(opts: {
     .join('\n\n');
 
   return { system, user, count };
+}
+
+export interface TrendResearch {
+  text: string;
+  sources: { title: string; url: string }[];
+}
+
+// Trend Scout: the first AI agent of a planning run. Searches the web for
+// current nail/beauty trends and the dates coming up, scoped by the client's
+// business and area from the Brand Card.
+export function buildTrendScoutPrompt(client: StudioClientCard, formatId: string): { instructions: string; input: string } {
+  const today = new Date().toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const days = formatId === 'plan30' ? 30 : 14;
+  const card = ['name', 'business', 'audience', 'usp', 'positioning', 'offer', 'notes']
+    .map((k) => (typeof client[k] === 'string' && String(client[k]).trim() ? `${k}: ${String(client[k]).trim().slice(0, 600)}` : ''))
+    .filter(Boolean)
+    .join('\n');
+  return {
+    instructions:
+      'คุณคือ Trend Scout ของทีมคอนเทนต์ ค้นเว็บจริงเท่านั้น ห้ามตอบจากความจำ สรุปเป็นภาษาไทยแบบหัวข้อสั้น ทุกข้อต้องมีชื่อแหล่ง วันที่ของข้อมูล และลิงก์ ถ้าหาแหล่งไม่ได้ให้เขียนว่าไม่พบ ห้ามเดา',
+    input: [
+      `วันนี้: ${today}`,
+      'ลูกค้า (จาก Brand Card):',
+      card,
+      `ค้นและสรุป: 1) เทรนด์เล็บ/ความงามที่เป็นปัจจุบัน (สี ลาย เทคนิค) ที่ร้านแบบนี้ทำได้จริง 3–5 ข้อ เน้นที่คนไทยพูดถึง (TikTok, IG, Pinterest, สื่อความงาม) 2) วันสำคัญ เทศกาล และโอกาสแต่งตัวในไทยใน ${days} วันข้างหน้า พร้อมวันที่ 3) ไอเดียโทนสีตามธีมหรือความเชื่อ (ระบุว่าเป็นความเชื่อ) ที่ตรงช่วงนี้`
+    ].join('\n')
+  };
 }
 
 export function buildAutofillPrompt(raw: string): { system: string; user: string } {

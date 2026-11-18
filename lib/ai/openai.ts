@@ -377,3 +377,62 @@ export async function transcribeAudioWithTimestamps(opts: {
 
   return { text, words, durationSec: Number(json.duration ?? 0), model };
 }
+
+// Web search via the OpenAI Responses API (built-in `web_search` tool). Used
+// by Content Studio's Trend Scout step: current nail trends and upcoming
+// dates must come from real, linkable sources, never from the model's memory.
+// Returns the model's text plus every URL it cited. Model: AI_SEARCH_MODEL,
+// else the Settings/env chat model. Older accounts/models only know the
+// `web_search_preview` tool, so a 400 retries once with that.
+export async function callOpenAIWebSearch(opts: {
+  instructions: string;
+  input: string;
+  timeoutMs?: number;
+  model?: string;
+}): Promise<{ text: string; sources: { title: string; url: string }[]; model: string }> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new AIProviderError('OPENAI_API_KEY is not configured in .env.local', 500);
+  }
+  const model = opts.model || process.env.AI_SEARCH_MODEL || (await resolveChatModel());
+  const timeoutMs = opts.timeoutMs ?? 60000;
+  const send = (tool: string) =>
+    fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, instructions: opts.instructions, input: opts.input, tools: [{ type: tool }] }),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+
+  let res: Response;
+  try {
+    res = await send('web_search');
+    if (res.status === 400) res = await send('web_search_preview');
+  } catch (err: any) {
+    if (err?.name === 'TimeoutError') {
+      throw new AIProviderError(`ค้นเทรนด์นานเกิน ${timeoutMs / 1000} วินาที`, 504);
+    }
+    throw new AIProviderError(err?.message || 'Unknown error calling AI provider', 502);
+  }
+  if (!res.ok) {
+    throw await toProviderError(res, 'OpenAI');
+  }
+
+  const json = await res.json();
+  let text = '';
+  const seen = new Map<string, string>();
+  for (const item of json.output ?? []) {
+    if (item?.type !== 'message') continue;
+    for (const c of item.content ?? []) {
+      if (c?.type !== 'output_text') continue;
+      text += (text ? '\n' : '') + (c.text ?? '');
+      for (const a of c.annotations ?? []) {
+        if (a?.type === 'url_citation' && typeof a.url === 'string' && !seen.has(a.url)) seen.set(a.url, a.title || a.url);
+      }
+    }
+  }
+  if (!text.trim()) {
+    throw new AIProviderError('ค้นเทรนด์ไม่ได้ผลลัพธ์', 502);
+  }
+  return { text: text.trim(), sources: [...seen].map(([url, title]) => ({ url, title })), model };
+}

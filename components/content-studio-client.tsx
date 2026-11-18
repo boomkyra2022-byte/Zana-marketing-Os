@@ -26,6 +26,7 @@ interface Draft {
   funnel: string;
   topic: string;
   saved: boolean;
+  sources?: { title: string; url: string }[];
 }
 
 const STATUS_LABEL: Record<Status, string> = { draft: 'ร่าง', approved: 'อนุมัติแล้ว', used: 'โพสต์แล้ว' };
@@ -46,16 +47,17 @@ async function api<T>(url: string, method: string, body: unknown): Promise<T> {
 }
 
 type GenItem = { title: string; body: string; retention?: StudioRetention | null };
+type GenResult = { items: GenItem[]; sources: { title: string; url: string }[] };
 
 // Generate with stage streaming: the API sends one NDJSON line per real step
 // (brand → examples → write → check) so the nail-salon scene can move the
 // agent of the step that is running, then the items (or a Thai error).
-async function generateStream(body: Record<string, unknown>, onStage: (e: { stage: string; examples?: number; count?: number }) => void): Promise<GenItem[]> {
+async function generateStream(body: Record<string, unknown>, onStage: (e: { stage: string; examples?: number; count?: number; ok?: boolean; sources?: number }) => void): Promise<GenResult> {
   const res = await fetch('/api/content-studio/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, stream: true }) });
   if (!res.ok || !res.body || !(res.headers.get('content-type') ?? '').includes('ndjson')) {
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json?.error || `เกิดข้อผิดพลาด (${res.status})`);
-    if (Array.isArray(json?.items)) return json.items;
+    if (Array.isArray(json?.items)) return { items: json.items, sources: json.sources ?? [] };
     throw new Error('AI ตอบกลับมาไม่ครบ ลองกดสร้างใหม่');
   }
   const reader = res.body.getReader();
@@ -78,7 +80,7 @@ async function generateStream(body: Record<string, unknown>, onStage: (e: { stag
       }
       if (e.type === 'stage') onStage(e);
       else if (e.type === 'error') throw new Error(e.error || 'เกิดข้อผิดพลาด ลองอีกครั้ง');
-      else if (e.type === 'done') return e.items as GenItem[];
+      else if (e.type === 'done') return { items: e.items as GenItem[], sources: Array.isArray(e.sources) ? e.sources : [] };
     }
     if (done) break;
   }
@@ -155,6 +157,7 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     libApproved: clientPosts.filter((p) => p.status === 'approved').length,
     libUsed: clientPosts.filter((p) => p.status === 'used').length,
     unsaved: drafts.filter((d) => !d.saved).length,
+    research: !!fmtObj?.research,
     avgScore: scored.length ? Math.round((scored.reduce((a, d) => a + (d.retention?.score ?? 0), 0) / scored.length) * 10) / 10 : null
   };
   const showResults = () => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -260,17 +263,20 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     setErr('');
     setDrafts([]);
     const want = fmtObj?.single ? 1 : count;
-    salon.start('generate', ['reception', 'brand', 'design', 'nail', 'qc'], `รับ brief: ${FMT[fmt] ?? fmt} · ${FUNNEL[funnel] ?? funnel}${topic.trim() ? ` · ${topic.trim()}` : ''}`);
+    salon.start('generate', fmtObj?.research ? ['reception', 'brand', 'scout', 'design', 'nail', 'qc'] : ['reception', 'brand', 'design', 'nail', 'qc'], `รับ brief: ${FMT[fmt] ?? fmt} · ${FUNNEL[funnel] ?? funnel}${topic.trim() ? ` · ${topic.trim()}` : ''}`);
     try {
-      const items = await generateStream({ mode: 'generate', client_id: client.id, format: fmt, funnel, topic, count }, (e) => {
+      const { items, sources } = await generateStream({ mode: 'generate', client_id: client.id, format: fmt, funnel, topic, count }, (e) => {
         if (e.stage === 'brand') salon.step('brand', `เปิด Brand Card ของ ${client.name}`);
+        else if (e.stage === 'scout') salon.step('scout', 'ค้นเว็บหาเทรนด์ + วันสำคัญ…');
+        else if (e.stage === 'scouted')
+          salon.step('scout', e.ok ? `ได้แหล่งอ้างอิง ${e.sources ?? 0} ลิงก์` : 'ค้นเว็บไม่สำเร็จ ทุกเทรนด์จะติด [ต้องเช็ก]');
         else if (e.stage === 'examples') salon.step('design', 'หาลายตัวอย่างที่อนุมัติแล้ว…');
         else if (e.stage === 'write') {
           salon.step('design', e.examples ? `ได้ลายตัวอย่าง ${e.examples} ชิ้น วางโครงแล้ว` : 'ยังไม่มีลายที่อนุมัติ ใช้แกนคอนเทนต์แทน');
           salon.step('nail', `AI กำลังเขียน ${e.count ?? want} ชิ้น…`);
         } else if (e.stage === 'check') salon.step('qc', 'ตรวจงาน + คะแนนดึงคนดู…');
       });
-      setDrafts(items.map((x) => ({ title: x.title, body: x.body, retention: x.retention ?? null, format: fmt, funnel, topic: topic.trim(), saved: false })));
+      setDrafts(items.map((x) => ({ title: x.title, body: x.body, retention: x.retention ?? null, format: fmt, funnel, topic: topic.trim(), saved: false, sources })));
       const sc = items.filter((x) => x.retention);
       const avg = sc.length ? Math.round((sc.reduce((a, x) => a + (x.retention?.score ?? 0), 0) / sc.length) * 10) / 10 : null;
       salon.finish(`ได้ ${items.length} ชิ้น${avg !== null ? ` เฉลี่ย ${avg}/10` : ''}`);
@@ -530,6 +536,18 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
                         </div>
                         <h4 className="font-semibold">{d.title}</h4>
                         <Retention r={d.retention} />
+                        {d.sources && d.sources.length > 0 && (
+                          <details className="text-sm">
+                            <summary className="cursor-pointer text-[var(--text-muted)]">แหล่งที่ Trend Scout ค้นเจอ ({d.sources.length} ลิงก์) — เปิดเช็กก่อนส่งบรีฟ</summary>
+                            <ul className="mt-1 list-disc pl-5 space-y-0.5">
+                              {d.sources.map((x) => (
+                                <li key={x.url} className="break-words">
+                                  <a href={x.url} target="_blank" rel="noreferrer noopener" className="underline">{x.title}</a>
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
                         <textarea rows={STUDIO_FORMATS.find((x) => x.id === d.format)?.single ? 22 : 10} aria-label="แก้ข้อความ" value={d.body} onChange={(e) => setDrafts((ds) => ds.map((x, j) => (j === i ? { ...x, body: e.target.value } : x)))} />
                         <div className="flex gap-2 flex-wrap">
                           <button type="button" className="btn-secondary" onClick={() => copy(d.body)}>

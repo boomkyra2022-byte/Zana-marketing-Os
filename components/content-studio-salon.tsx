@@ -6,12 +6,13 @@
 //
 //   1 เคาน์เตอร์ต้อนรับ  รับ brief (รูปแบบ / Funnel / หัวข้อ / จำนวน), อ่านข้อมูลดิบตอน autofill
 //   2 ตู้ Brand Card     โหลด Brand Card ของลูกค้า (server) · AI กรอก / บันทึก Brand Card
-//   3 โต๊ะออกแบบลาย      ดึงงานที่อนุมัติแล้วรูปแบบเดียวกันมาเป็นตัวอย่างสไตล์ (server)
-//   4 โต๊ะทำเล็บ         OpenAI เขียนคอนเทนต์ (server)
-//   5 มุมถ่ายรูป·ตรวจงาน  ตรวจ JSON + คะแนนดึงคนดูจนจบของแต่ละชิ้น (server)
-//   6 ตู้โชว์ผลงาน        เก็บชิ้นที่เลือกเข้าคลัง (POST /api/content-studio/posts)
+//   3 มุมหาเทรนด์        Trend Scout: ค้นเว็บจริงหาเทรนด์ + วันสำคัญพร้อมลิงก์ (server; เฉพาะรูปแบบวางแผน)
+//   4 โต๊ะออกแบบลาย      ดึงงานที่อนุมัติแล้วรูปแบบเดียวกันมาเป็นตัวอย่างสไตล์ (server)
+//   5 โต๊ะทำเล็บ         OpenAI เขียนคอนเทนต์ (server)
+//   6 มุมถ่ายรูป·ตรวจงาน  ตรวจ JSON + คะแนนดึงคนดูจนจบของแต่ละชิ้น (server)
+//   7 ตู้โชว์ผลงาน        เก็บชิ้นที่เลือกเข้าคลัง (POST /api/content-studio/posts)
 //
-// Steps 2–5 follow the NDJSON stage lines streamed by
+// Steps 2–6 follow the NDJSON stage lines streamed by
 // /api/content-studio/ai (mode generate, stream: true), so the agent that is
 // moving is the step the server is actually on. Same original anime-action
 // agents and --cc- tokens as the Creative Office / Warehouse views; pure
@@ -22,7 +23,7 @@ import { Agent, starburst } from '@/components/creative-warehouse';
 import { clip, visLen } from '@/components/creative-office';
 import './creative-city.css';
 
-export type StationId = 'reception' | 'brand' | 'design' | 'nail' | 'qc' | 'showcase';
+export type StationId = 'reception' | 'brand' | 'scout' | 'design' | 'nail' | 'qc' | 'showcase';
 export type SalonKind = 'generate' | 'autofill' | 'card' | 'save';
 
 export interface SalonLog {
@@ -57,6 +58,7 @@ export interface SalonInfo {
   libUsed: number;
   unsaved: number;
   avgScore: number | null;
+  research: boolean; // the selected format runs the Trend Scout
 }
 
 const INK = 'var(--cc-ink)';
@@ -79,13 +81,15 @@ export const STATIONS: StationDef[] = [
     job: 'รับ brief: รูปแบบ ขั้น Funnel หัวข้อ และจำนวนชิ้น · ตอนเพิ่มลูกค้าใหม่จะอ่านข้อมูลดิบที่วางไว้' },
   { id: 'brand', badge: '2', name: 'ตู้ Brand Card', agent: 'น้องคุมโทน', r: 1,
     job: 'เปิด Brand Card ของลูกค้า (จุดยืน น้ำเสียง โปร ข้อห้าม) ให้ทุกชิ้นไปทางเดียวกัน · ให้ AI กรอกและบันทึก Brand Card' },
-  { id: 'design', badge: '3', name: 'โต๊ะออกแบบลาย', agent: 'น้องดีไซน์', r: 4,
+  { id: 'scout', badge: '3', name: 'มุมหาเทรนด์', agent: 'น้องสายข่าว', r: 3,
+    job: 'AI ตัวแรกที่ออกไปหาข้อมูล: ค้นเว็บจริงหาเทรนด์เล็บ/ความงามและวันสำคัญที่กำลังจะมาถึง ทุกข้อมีลิงก์และวันที่ และกันธีมซ้ำกับ 7 วันล่าสุด (ทำงานเฉพาะ Creative Brief หน้าร้าน และแผน 30 วัน)' },
+  { id: 'design', badge: '4', name: 'โต๊ะออกแบบลาย', agent: 'น้องดีไซน์', r: 4,
     job: 'ดึงงานที่อนุมัติแล้วในรูปแบบเดียวกัน (สูงสุด 3 ชิ้น) มาเป็นลายตัวอย่างสไตล์ แล้ววางโครงคำสั่ง' },
-  { id: 'nail', badge: '4', name: 'โต๊ะทำเล็บ', agent: 'น้องช่างเขียน', r: 3,
+  { id: 'nail', badge: '5', name: 'โต๊ะทำเล็บ', agent: 'น้องช่างเขียน', r: 3,
     job: 'AI เขียนคอนเทนต์ตาม Brand Card ลายตัวอย่าง และหัวข้อวันนี้ (ขั้นที่ใช้เวลานานสุด)' },
-  { id: 'qc', badge: '5', name: 'มุมถ่ายรูป · ตรวจงาน', agent: 'น้องตรวจงาน', r: 2,
+  { id: 'qc', badge: '6', name: 'มุมถ่ายรูป · ตรวจงาน', agent: 'น้องตรวจงาน', r: 2,
     job: 'ตรวจว่าคำตอบครบ แล้วดูคะแนนดึงคนดูจนจบ 6 ข้อของแต่ละชิ้น ข้อไหนไม่ผ่านบอกวิธีแก้' },
-  { id: 'showcase', badge: '6', name: 'ตู้โชว์ผลงาน', agent: 'น้องดูแลคลัง', r: 1,
+  { id: 'showcase', badge: '7', name: 'ตู้โชว์ผลงาน', agent: 'น้องดูแลคลัง', r: 1,
     job: 'เก็บชิ้นที่เลือกเข้าคลังของลูกค้า (ร่าง หรือ อนุมัติ) · งานที่อนุมัติจะกลับไปเป็นลายตัวอย่างรอบหน้า' }
 ];
 const ORDER = STATIONS.map((s) => s.id);
@@ -229,8 +233,9 @@ function makeLayout(w: number, cols: number[], rowsY: number[], rows: StationId[
   return { w, h, pos, lane, at };
 }
 
-const WIDE = makeLayout(780, [130, 390, 650], [250, 476], [['reception', 'brand', 'design'], ['nail', 'qc', 'showcase']], 540);
-const TALL = makeLayout(440, [115, 325], [250, 486, 722], [['reception', 'brand'], ['design', 'nail'], ['qc', 'showcase']], 780);
+const WIDE_COLS = [115, 322, 529, 736];
+const WIDE = makeLayout(850, WIDE_COLS, [250, 476], [['reception', 'brand', 'scout', 'design'], ['nail', 'qc', 'showcase']], 540);
+const TALL = makeLayout(440, [115, 325], [250, 486, 722, 958], [['reception', 'brand'], ['scout', 'design'], ['nail', 'qc'], ['showcase']], 1016);
 
 // ---------- drawing ----------
 
@@ -317,6 +322,26 @@ function Backdrop({ id, cx, fy, info }: { id: StationId; cx: number; fy: number;
         </g>
       );
     }
+    case 'scout':
+      return (
+        <g>
+          {/* news / trend board */}
+          <rect x={cx + 6} y={fy - 158} width={82} height={70} rx={4} fill="var(--cc-trunk)" fillOpacity={0.35} stroke={INK} strokeWidth={2.5} />
+          <text x={cx + 47} y={fy - 147} textAnchor="middle" dominantBaseline="central" fontSize={9.5} fontWeight={700} fill="var(--cc-fg)" letterSpacing={1}>TREND</text>
+          {[
+            [cx + 12, fy - 138, 'var(--cc-w1)', -4],
+            [cx + 40, fy - 136, 'var(--cc-w4)', 5],
+            [cx + 64, fy - 139, 'var(--cc-w2)', -3]
+          ].map(([x, y, c, r], k) => (
+            <g key={k} transform={`rotate(${r} ${Number(x) + 10} ${Number(y) + 12})`}>
+              <rect x={Number(x)} y={Number(y)} width={20} height={24} fill={String(c)} stroke={INK} strokeWidth={1.5} />
+              <path d={`M${Number(x) + 3},${Number(y) + 9} H${Number(x) + 17} M${Number(x) + 3},${Number(y) + 14} H${Number(x) + 13}`} stroke={INK} strokeWidth={1.3} strokeLinecap="round" opacity={0.6} />
+              <circle cx={Number(x) + 10} cy={Number(y) + 2} r={2.5} fill="var(--cc-accent)" stroke={INK} strokeWidth={1} />
+            </g>
+          ))}
+          <path d={`M${cx + 22},${fy - 112} L${cx + 50},${fy - 110} L${cx + 74},${fy - 113}`} fill="none" stroke="var(--cc-accent)" strokeWidth={1.5} strokeDasharray="3 2" />
+        </g>
+      );
     case 'design':
       return (
         <g>
@@ -414,6 +439,34 @@ function Furniture({ id, cx, fy, working, info }: { id: StationId; cx: number; f
           ))}
           <text x={cx - 28} y={fy - 24} textAnchor="middle" dominantBaseline="central" fontSize={10} fill="var(--cc-muted)">
             ลาย {Math.min(3, info.examples)}
+          </text>
+        </g>
+      );
+    case 'scout':
+      return (
+        <g>
+          <rect x={cx - 86} y={fy - 52} width={140} height={10} rx={3} fill="var(--cc-r3)" {...S} />
+          <rect x={cx - 80} y={fy - 42} width={128} height={38} rx={3} fill="var(--cc-w1)" {...S} />
+          {/* laptop with a rising trend line */}
+          <path d={`M${cx - 6},${fy - 52} L${cx + 2},${fy - 86} L${cx + 46},${fy - 86} L${cx + 50},${fy - 52} Z`} fill="var(--cc-r3)" {...S} />
+          <rect x={cx + 6} y={fy - 82} width={38} height={24} rx={2} fill="var(--cc-win)" />
+          <path
+            className={working ? 'sl-paint' : undefined}
+            d={`M${cx + 9},${fy - 62} L${cx + 18},${fy - 68} L${cx + 26},${fy - 65} L${cx + 40},${fy - 78}`}
+            fill="none"
+            stroke="var(--cc-accent)"
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          {/* globe = web search */}
+          <g transform={`translate(${cx - 56},${fy - 64})`}>
+            <circle r={11} fill="var(--cc-w3)" stroke={INK} strokeWidth={2} />
+            <ellipse rx={5} ry={11} fill="none" stroke={INK} strokeWidth={1.4} />
+            <path d="M-11,0 H11 M-9,-6 H9 M-9,6 H9" stroke={INK} strokeWidth={1.2} />
+          </g>
+          <text x={cx - 18} y={fy - 23} textAnchor="middle" dominantBaseline="central" fontSize={10} fill="var(--cc-muted)">
+            {info.research ? 'ค้นเว็บ' : 'พัก'}
           </text>
         </g>
       );
@@ -516,6 +569,10 @@ function idleLines(id: StationId, info: SalonInfo): string[] {
       return [info.clientName ? `ลูกค้าวันนี้: ${info.clientName}` : 'ยังไม่ได้เลือกลูกค้า', `ลูกค้าในร้าน ${info.clientCount} ราย`, 'กด ✦ สร้างคอนเทนต์ ได้เลย'];
     case 'brand':
       return [`Brand Card ครบ ${info.cardFilled}/${info.cardTotal} ช่อง`, info.positioning ? `จุดยืน: ${info.positioning}` : 'ยังไม่มีจุดยืนคอนเทนต์', 'โทนสีแบรนด์พร้อมแล้ว'];
+    case 'scout':
+      return info.research
+        ? ['รอบนี้ออกไปหาเทรนด์ให้', 'หาวันสำคัญที่กำลังมาถึง', 'ทุกข้อต้องมีลิงก์']
+        : ['รูปแบบนี้ไม่ต้องค้นเทรนด์', 'เลือก Creative Brief ได้นะ', 'ตามข่าวเล็บไว้รอแล้ว'];
     case 'design':
       return [info.examples ? `มีลายตัวอย่าง ${Math.min(3, info.examples)} ชิ้น` : 'ยังไม่มีลายที่อนุมัติ', `รูปแบบ: ${info.formatName}`, `ขั้น: ${info.funnelName}`];
     case 'nail':
@@ -654,7 +711,7 @@ export default function ContentStudioSalon({ run, info, onShowResults }: { run: 
 
         {/* step strip — always visible, even when the scene is collapsed */}
         <ol className="sl-steps" aria-label="ขั้นตอนรอบล่าสุด">
-          {(run?.steps ?? ['reception', 'brand', 'design', 'nail', 'qc']).map((id) => {
+          {(run?.steps ?? (info.research ? ['reception', 'brand', 'scout', 'design', 'nail', 'qc'] : ['reception', 'brand', 'design', 'nail', 'qc'])).map((id) => {
             const st = STATIONS.find((s) => s.id === id)!;
             const s = states[id];
             return (
@@ -693,12 +750,12 @@ export default function ContentStudioSalon({ run, info, onShowResults }: { run: 
                 {!tall &&
                   [18, L.w - 108].map((wx) => (
                     <g key={wx}>
-                      <rect x={wx} y={18} width={90} height={56} rx={6} fill="var(--cc-win)" stroke={INK} strokeWidth={3} />
-                      <path d={`M${wx + 10},66 L${wx + 30},30 M${wx + 26},68 L${wx + 46},32`} stroke="var(--cc-w1)" strokeWidth={4} strokeLinecap="round" opacity={0.6} />
+                      <rect x={wx} y={14} width={90} height={38} rx={6} fill="var(--cc-win)" stroke={INK} strokeWidth={3} />
+                      <path d={`M${wx + 10},46 L${wx + 24},22 M${wx + 26},47 L${wx + 40},23`} stroke="var(--cc-w1)" strokeWidth={4} strokeLinecap="round" opacity={0.6} />
                     </g>
                   ))}
                 {/* hanging lamps */}
-                {(tall ? [60, L.w - 60] : [L.w / 2 - 200, L.w / 2 + 200]).map((lx) => (
+                {(tall ? [60, L.w - 60] : []).map((lx) => (
                   <g key={lx}>
                     <line x1={lx} y1={0} x2={lx} y2={70} stroke={INK} strokeWidth={2} />
                     <path d={`M${lx - 14},82 A14,12 0 0 1 ${lx + 14},82 Z`} fill="var(--cc-r4)" stroke={INK} strokeWidth={2.5} />
@@ -755,6 +812,16 @@ export default function ContentStudioSalon({ run, info, onShowResults }: { run: 
                   );
                 })}
 
+                {!tall && (
+                  <g aria-hidden="true">
+                    {/* waiting corner in the free slot of the second row */}
+                    <rect x={WIDE_COLS[0] - 70} y={476 - 46} width={110} height={30} rx={10} fill="var(--cc-r2)" fillOpacity={0.55} stroke={INK} strokeWidth={2.5} />
+                    <rect x={WIDE_COLS[0] - 76} y={476 - 22} width={122} height={16} rx={6} fill="var(--cc-r2)" stroke={INK} strokeWidth={2.5} />
+                    <rect x={WIDE_COLS[0] + 54} y={476 - 34} width={24} height={28} rx={3} fill="var(--cc-trunk)" stroke={INK} strokeWidth={2.5} />
+                    <circle cx={WIDE_COLS[0] + 66} cy={476 - 52} r={17} fill="var(--cc-tree)" stroke={INK} strokeWidth={2.5} />
+                    <text x={WIDE_COLS[0] - 15} y={476 - 66} textAnchor="middle" fontSize={11} fontWeight={600} fill="var(--cc-muted)">มุมรอคิว</text>
+                  </g>
+                )}
                 {run && <Token x={tx} y={ty} />}
               </svg>
               <div className="cc-legend">
