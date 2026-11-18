@@ -194,3 +194,42 @@
   .co-typing, .co-screen .co-line3, .co-bubble { animation: none; }
   .co-bar > span, .co-fill { transition: none; }
 }
+
+/* Content Studio nail salon (components/content-studio-salon.tsx) */
+.cc.sl { font-size: 15px; }
+.sl-wrap { padding: 16px; }
+@container (min-width: 640px) { .sl-wrap { padding: 18px 20px 20px; } }
+.sl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+.sl-title { font-family: var(--cc-display); font-weight: 600; font-size: clamp(20px, 4vw, 26px); line-height: 1.2; margin: 2px 0 0; color: var(--cc-fg); }
+.sl-toggle { flex: none; font: inherit; font-family: var(--cc-display); font-size: 14px; color: var(--cc-accent2); background: var(--cc-surface); border: 1.5px solid var(--cc-rule); border-radius: 10px; padding: 6px 12px; cursor: pointer; }
+.sl-toggle:focus-visible { outline: 3px solid var(--cc-accent); outline-offset: 2px; }
+.sl-steps { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sl-step { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; border-radius: 999px; font-size: 13.5px; font-weight: 600; border: 1.5px solid var(--cc-rule); background: var(--cc-surface); color: var(--cc-muted); }
+.sl-step-n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--cc-floor2); color: var(--cc-fg); font-family: var(--cc-display); font-size: 12.5px; }
+.sl-step.working { border-color: var(--cc-ok); color: var(--cc-fg); }
+.sl-step.working .sl-step-n { background: var(--cc-ok); color: #fff; animation: sl-pulse 1s ease-in-out infinite alternate; }
+.sl-step.done { color: var(--cc-ok); }
+.sl-step.done .sl-step-n { background: var(--cc-ok); color: #fff; }
+.sl-step.error { border-color: var(--cc-accent); color: var(--cc-accent); }
+.sl-step.error .sl-step-n { background: var(--cc-accent); color: #fff; }
+.sl-step.waiting { border-style: dashed; }
+.sl-step-time { font-size: 13.5px; color: var(--cc-muted); font-variant-numeric: tabular-nums; margin-left: 4px; }
+.sl-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+@container (min-width: 1100px) { .sl-grid { grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); align-items: start; } }
+.sl-h { font-family: var(--cc-display); font-weight: 600; font-size: 22px; line-height: 1.2; margin: 2px 0 8px; color: var(--cc-fg); }
+.cc-state.sl-working strong, .cc-state.sl-done strong { color: var(--cc-ok); }
+.cc-state.sl-error strong { color: var(--cc-accent); }
+.cc-state.sl-idle strong, .cc-state.sl-waiting strong { color: var(--cc-muted); }
+.sl-err { color: var(--cc-accent); font-weight: 600; }
+.sl-dim { opacity: .55; }
+.sl-pulse { transform-box: fill-box; transform-origin: 50% 50%; animation: sl-pulse .8s ease-in-out infinite alternate; }
+@keyframes sl-pulse { from { transform: scale(.85); opacity: .75; } to { transform: scale(1.15); opacity: 1; } }
+.sl-spark { animation: sl-spin 1.2s linear infinite; }
+@keyframes sl-spin { to { transform: rotate(360deg); } }
+.sl-paint { animation: sl-paint 1.1s ease-in-out infinite alternate; }
+@keyframes sl-paint { from { opacity: .25; } to { opacity: 1; } }
+.sl-glow { animation: sl-glow 1.4s ease-in-out infinite alternate; }
+@keyframes sl-glow { from { opacity: .2; } to { opacity: .75; } }
+@media (prefers-reduced-motion: reduce) {
+  .sl-pulse, .sl-spark, .sl-paint, .sl-glow, .sl-step.working .sl-step-n { animation: none; }
+}
