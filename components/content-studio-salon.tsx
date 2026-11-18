@@ -59,6 +59,21 @@ export interface SalonInfo {
   unsaved: number;
   avgScore: number | null;
   research: boolean; // the selected format runs the Trend Scout
+  week: SalonWeek;
+}
+
+// The weekly managed-account loop, read from the client's library:
+// Monday news run → Creative Brief → ideas → waiting for real work →
+// real work received → posted.
+export interface SalonWeek {
+  startLabel: string; // e.g. "จ. 16 พ.ย."
+  isMonday: boolean;
+  due: boolean; // no Creative Brief yet this week
+  briefTitle: string | null;
+  ideas: number;
+  waiting: number;
+  received: number;
+  posted: number;
 }
 
 const INK = 'var(--cc-ink)';
@@ -163,8 +178,9 @@ export function useSalonRun() {
 
 // ---------- layout ----------
 
-type StState = 'idle' | 'waiting' | 'working' | 'done' | 'error';
+type StState = 'idle' | 'waiting' | 'working' | 'done' | 'error' | 'due';
 const STATE_LABEL: Record<StState, string> = {
+  due: 'ถึงรอบหาข่าวประจำสัปดาห์',
   idle: 'พร้อมรับงาน',
   waiting: 'รอคิว',
   working: 'กำลังทำงาน',
@@ -276,6 +292,7 @@ function StateMark({ s, x, y }: { s: StState; x: number; y: number }) {
       </g>
     );
   if (s === 'waiting') return <circle cx={x} cy={y} r={6} fill="none" stroke="var(--cc-muted)" strokeWidth={2.5} strokeDasharray="3 2.5" />;
+  if (s === 'due') return <circle className="sl-pulse" cx={x} cy={y} r={7} fill="var(--cc-todo)" stroke={INK} strokeWidth={1.5} />;
   return <circle cx={x} cy={y} r={6} fill="var(--cc-muted)" stroke={INK} strokeWidth={1.5} />;
 }
 
@@ -566,13 +583,17 @@ function stationState(run: SalonRun | null, id: StationId): StState {
 function idleLines(id: StationId, info: SalonInfo): string[] {
   switch (id) {
     case 'reception':
-      return [info.clientName ? `ลูกค้าวันนี้: ${info.clientName}` : 'ยังไม่ได้เลือกลูกค้า', `ลูกค้าในร้าน ${info.clientCount} ราย`, 'กด ✦ สร้างคอนเทนต์ ได้เลย'];
+      return info.week.due
+        ? [`รอบสัปดาห์ ${info.week.startLabel} เริ่มแล้ว`, 'ส่งต่อให้มุมหาเทรนด์ไปหาข่าว', info.clientName ? `ลูกค้า: ${info.clientName}` : 'ยังไม่ได้เลือกลูกค้า']
+        : [`สัปดาห์นี้บรีฟแล้ว: ${info.week.briefTitle ?? ''}`, `แตกเป็นไอเดีย ${info.week.ideas} ชิ้น`, `รอผลงานจริงจากร้าน ${info.week.waiting} ชิ้น`];
     case 'brand':
       return [`Brand Card ครบ ${info.cardFilled}/${info.cardTotal} ช่อง`, info.positioning ? `จุดยืน: ${info.positioning}` : 'ยังไม่มีจุดยืนคอนเทนต์', 'โทนสีแบรนด์พร้อมแล้ว'];
     case 'scout':
+      if (info.week.due)
+        return [info.week.isMonday ? 'วันจันทร์! ออกไปหาข่าวประจำสัปดาห์' : 'สัปดาห์นี้ยังไม่ได้หาข่าว', 'ข่าวมู วันสำคัญ กระแสสี', 'กดเริ่มรอบสัปดาห์นี้ได้เลย'];
       return info.research
         ? ['รอบนี้ออกไปหาเทรนด์ให้', 'หาวันสำคัญที่กำลังมาถึง', 'ทุกข้อต้องมีลิงก์']
-        : ['รูปแบบนี้ไม่ต้องค้นเทรนด์', 'เลือก Creative Brief ได้นะ', 'ตามข่าวเล็บไว้รอแล้ว'];
+        : ['ได้ข่าวประจำสัปดาห์แล้ว', 'รอบหน้า: วันจันทร์', 'ตามข่าวมูไว้รอแล้ว'];
     case 'design':
       return [info.examples ? `มีลายตัวอย่าง ${Math.min(3, info.examples)} ชิ้น` : 'ยังไม่มีลายที่อนุมัติ', `รูปแบบ: ${info.formatName}`, `ขั้น: ${info.funnelName}`];
     case 'nail':
@@ -580,7 +601,11 @@ function idleLines(id: StationId, info: SalonInfo): string[] {
     case 'qc':
       return [info.avgScore === null ? 'รอตรวจงานชิ้นแรก' : `รอบล่าสุดเฉลี่ย ${info.avgScore}/10`, 'เช็กดึงคนดูจนจบ 6 ข้อ', 'ข้อไหนไม่ผ่านบอกวิธีแก้'];
     case 'showcase':
-      return [`คลังมี ${info.libTotal} ชิ้น`, `อนุมัติ ${info.libApproved} · โพสต์แล้ว ${info.libUsed}`, info.unsaved ? `รอเก็บ ${info.unsaved} ชิ้น` : 'เก็บงานที่ชอบไว้ที่นี่'];
+      return [
+        `รอผลงานจริง ${info.week.waiting} · ได้แล้ว ${info.week.received}`,
+        `สัปดาห์นี้โพสต์แล้ว ${info.week.posted} ชิ้น`,
+        info.unsaved ? `รอเก็บ ${info.unsaved} ชิ้น` : `คลังมี ${info.libTotal} ชิ้น`
+      ];
   }
 }
 
@@ -590,7 +615,17 @@ function secs(ms: number) {
 
 // ---------- section ----------
 
-export default function ContentStudioSalon({ run, info, onShowResults }: { run: SalonRun | null; info: SalonInfo; onShowResults?: () => void }) {
+export default function ContentStudioSalon({
+  run,
+  info,
+  onShowResults,
+  onStartWeek
+}: {
+  run: SalonRun | null;
+  info: SalonInfo;
+  onShowResults?: () => void;
+  onStartWeek?: () => void;
+}) {
   const [open, setOpen] = useState(true);
   const [animate, setAnimate] = useState(false);
   const [tall, setTall] = useState(false);
@@ -667,7 +702,10 @@ export default function ContentStudioSalon({ run, info, onShowResults }: { run: 
     });
   }
 
+  const busy = run?.status === 'running';
   const states = Object.fromEntries(ORDER.map((id) => [id, stationState(run, id)])) as Record<StationId, StState>;
+  // Nothing running and no brief yet this week → the Trend Scout is due.
+  if (info.week.due && run?.status !== 'running' && states.scout === 'idle') states.scout = 'due';
   const tick = Math.floor(now / 3200);
   const lastText = (id: StationId) => [...(run?.log ?? [])].reverse().find((l) => l.station === id)?.text ?? '';
   const stageStartedAt = run ? [...run.log].reverse().find((l) => l.station === run.stage)?.at ?? run.startedAt : 0;
@@ -683,6 +721,7 @@ export default function ContentStudioSalon({ run, info, onShowResults }: { run: 
     if (s === 'error') return { text: run?.error ?? 'ทำไม่สำเร็จ', tone: 'err' };
     if (run && run.status === 'done' && run.stage === id && now - (run.endedAt ?? 0) < 9000) return { text: lastText(id), tone: 'ok' };
     if (id === 'showcase' && waitingShowcase) return { text: `รอคุณกดเก็บ ${info.unsaved} ชิ้น` };
+    if (s === 'due') return { text: idleLines('scout', info)[0] };
     if (run?.status === 'running') return null;
     if ((tick + i) % 3 !== 0) return null;
     const lines = idleLines(id, info);
@@ -693,7 +732,6 @@ export default function ContentStudioSalon({ run, info, onShowResults }: { run: 
   const selState = states[selected];
   const [tx, ty] = pointAt(L.lane, laneCum, tokenD);
   const lanePath = 'M' + L.lane.map((p) => p.join(',')).join(' L');
-  const busy = run?.status === 'running';
   const total = run ? (run.endedAt ?? now) - run.startedAt : 0;
 
   return (
@@ -708,6 +746,33 @@ export default function ContentStudioSalon({ run, info, onShowResults }: { run: 
             {open ? 'ซ่อนร้าน' : 'แสดงร้าน'}
           </button>
         </header>
+
+        {/* weekly workflow — read from the library, always visible */}
+        <div className="sl-week" aria-label="Workflow รอบสัปดาห์นี้">
+          <span className="sl-week-h">รอบสัปดาห์นี้ (เริ่ม {info.week.startLabel})</span>
+          <ol className="sl-steps">
+            {(
+              [
+                ['หาข่าวประจำสัปดาห์', !info.week.due, info.week.due ? (info.week.isMonday ? 'วันนี้' : 'ค้างอยู่') : '✓'],
+                ['Creative Brief', !info.week.due, info.week.due ? '—' : '✓'],
+                ['แตกเป็นไอเดีย', info.week.ideas > 0, String(info.week.ideas)],
+                ['รอผลงานจริง', info.week.waiting > 0, String(info.week.waiting)],
+                ['ได้ผลงานแล้ว', info.week.received > 0, String(info.week.received)],
+                ['โพสต์แล้ว', info.week.posted > 0, String(info.week.posted)]
+              ] as [string, boolean, string][]
+            ).map(([label, on, n], i) => (
+              <li key={label} className={`sl-step ${on ? 'done' : i === 0 && info.week.due ? 'due' : 'waiting'}`}>
+                <span className="sl-step-n">{n}</span>
+                {label}
+              </li>
+            ))}
+          </ol>
+          {info.week.due && onStartWeek && !busy && (
+            <button type="button" className="cc-next sl-start" onClick={onStartWeek}>
+              ✦ เริ่มรอบสัปดาห์นี้: หาข่าว + ทำ Creative Brief
+            </button>
+          )}
+        </div>
 
         {/* step strip — always visible, even when the scene is collapsed */}
         <ol className="sl-steps" aria-label="ขั้นตอนรอบล่าสุด">
@@ -794,7 +859,7 @@ export default function ContentStudioSalon({ run, info, onShowResults }: { run: 
                         <Backdrop id={st.id} cx={cx} fy={fy} info={info} />
                       </g>
                       <g aria-hidden="true" className={s === 'waiting' ? 'sl-dim' : undefined}>
-                        <g className={working && animate ? 'co-typing' : undefined}>
+                        <g className={(working || s === 'due') && animate ? 'co-typing' : undefined}>
                           <Agent x={cx - 40} y={fy - 48} look="ai" aura={working} color={`var(--cc-r${st.r})`} scale={0.95} />
                         </g>
                         {working && animate && (

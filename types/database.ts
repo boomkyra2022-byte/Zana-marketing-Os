@@ -612,6 +612,11 @@ export interface StudioPost {
   retention: StudioRetention | null;
   status: 'draft' | 'approved' | 'used';
   used_at: string | null;
+  // migration 0033 — real-work tracking for ideas split from a brief
+  production?: 'waiting' | 'received' | null;
+  production_note?: string | null;
+  production_at?: string | null;
+  parent_id?: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
