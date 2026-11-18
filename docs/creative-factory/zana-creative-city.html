@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>html{color-scheme:light}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>ZANA Creative City</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mitr:wght@400;500;600&family=Sarabun:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: portrait town map (ring road, CEO hall at the centre) beside a station detail panel; stacks on phones. */
+:root{
+  --bg:#f2f0fa; --surface:#ffffff; --fg:#1b1d4a; --muted:#5c5f88; --rule:#d9d6ee;
+  --accent:#c2317c; --accent2:#5746d4;
+  --ok:#168a5d; --todo:#b06f0a; --human:#5746d4;
+  --ground:#dcefe2; --plaza:#fbe6f0; --road:#ece8f8; --roadline:#bdb6e2; --shade:rgba(27,29,74,.14);
+  --line:#262863; --win:#a6d8f6; --tree:#79c596; --trunk:#8a6a55;
+  --w1:#ffffff; --w2:#ffe4ef; --w3:#e4e7ff; --w4:#fff1c9;
+  --r1:#7868e6; --r2:#e2659f; --r3:#3d49b3; --r4:#f0a637;
+  --display:"Mitr","Sarabun",system-ui,sans-serif;
+  --body:"Sarabun",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111230; --surface:#1b1d44; --fg:#eceafb; --muted:#a7a9d0; --rule:#33366b;
+    --accent:#ff7fbd; --accent2:#a99cff;
+    --ok:#4fd3a0; --todo:#f0b54d; --human:#a99cff;
+    --ground:#1d2a4c; --plaza:#35274f; --road:#2c2f66; --roadline:#555aa3; --shade:rgba(0,0,0,.35);
+    --line:#0b0c24; --win:#ffd978; --tree:#2f7d5d; --trunk:#5b4638;
+    --w1:#474b8e; --w2:#6a4370; --w3:#3b4a8f; --w4:#6a5f36;
+    --r1:#8f81f5; --r2:#ee78b0; --r3:#5967d6; --r4:#f3b550;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#111230; --surface:#1b1d44; --fg:#eceafb; --muted:#a7a9d0; --rule:#33366b;
+  --accent:#ff7fbd; --accent2:#a99cff;
+  --ok:#4fd3a0; --todo:#f0b54d; --human:#a99cff;
+  --ground:#1d2a4c; --plaza:#35274f; --road:#2c2f66; --roadline:#555aa3; --shade:rgba(0,0,0,.35);
+  --line:#0b0c24; --win:#ffd978; --tree:#2f7d5d; --trunk:#5b4638;
+  --w1:#474b8e; --w2:#6a4370; --w3:#3b4a8f; --w4:#6a5f36;
+  --r1:#8f81f5; --r2:#ee78b0; --r3:#5967d6; --r4:#f3b550;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.55}
+.wrap{max-width:1080px;margin:0 auto;padding-block:20px 40px;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px))}
+header{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
+.eyebrow{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+h1{font-family:var(--display);font-weight:600;font-size:clamp(26px,5vw,36px);line-height:1.15;margin:0;text-wrap:balance}
+.lead{margin:0;color:var(--muted);max-width:62ch}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;font-size:14px;font-weight:600;border:1.5px solid var(--rule);background:var(--surface)}
+.chip.on{border-color:var(--accent2);color:var(--accent2)}
+.chip.ghost{border-style:dashed;color:var(--muted);font-weight:500;background:transparent}
+.counts{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:15px}
+.counts b{font-family:var(--display);font-weight:600;font-size:20px;font-variant-numeric:tabular-nums}
+.mark{display:inline-block;width:11px;height:11px;flex:none}
+.mark.ok{background:var(--ok);border-radius:50%}
+.mark.todo{border:2.5px solid var(--todo);border-radius:50%}
+.mark.human{background:var(--human);border-radius:2px}
+.grid{display:grid;gap:20px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:880px){.grid{grid-template-columns:minmax(0,540px) minmax(0,1fr);align-items:start}
+  .side{position:sticky;top:calc(env(safe-area-inset-top, 0px) + 16px)}}
+.mapbox{background:var(--surface);border:1.5px solid var(--rule);border-radius:18px;padding:8px}
+svg#city{display:block;width:100%;height:auto;max-width:100%;border-radius:12px}
+svg#city text{font-family:var(--display)}
+.st{cursor:pointer;outline:none}
+.st .halo{opacity:0;transition:opacity .15s}
+.st.sel .halo,.st:hover .halo{opacity:1}
+.st:focus-visible .pill{stroke:var(--accent);stroke-width:4}
+.st.sel .pill{stroke:var(--accent);stroke-width:3.5}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13.5px;color:var(--muted);padding:10px 8px 4px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.dash{width:26px;height:0;border-top:3px dashed var(--accent)}
+.side{display:flex;flex-direction:column;gap:16px;min-width:0}
+.panel{background:var(--surface);border:1.5px solid var(--rule);border-radius:18px;padding:18px 18px 16px}
+.panel .num{font-family:var(--display);font-size:14px;color:var(--muted)}
+.panel h2{font-family:var(--display);font-weight:600;font-size:26px;line-height:1.2;margin:2px 0 8px}
+.state{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:15px;margin-bottom:12px}
+.state strong{font-weight:700}
+.state.ok strong{color:var(--ok)} .state.todo strong{color:var(--todo)} .state.human strong{color:var(--human)}
+dl{margin:0;display:grid;grid-template-columns:minmax(0,1fr);gap:10px;border-top:1.5px solid var(--rule);padding-top:12px}
+dt{font-size:13px;color:var(--muted);font-weight:600;letter-spacing:.02em}
+dd{margin:0;overflow-wrap:anywhere}
+dd code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;background:var(--bg);padding:1px 6px;border-radius:5px}
+.next{margin-top:14px;font:inherit;font-weight:600;font-size:15px;color:var(--surface);background:var(--accent2);border:0;border-radius:10px;padding:9px 14px;cursor:pointer}
+.next:focus-visible,.item:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+h3{font-family:var(--display);font-weight:500;font-size:17px;margin:0 0 6px}
+ol.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.item{width:100%;display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:10px;text-align:left;
+  font:inherit;color:inherit;background:var(--surface);border:1.5px solid var(--rule);border-radius:12px;padding:8px 12px;cursor:pointer}
+.item.sel{border-color:var(--accent)}
+.item .n{font-family:var(--display);font-variant-numeric:tabular-nums;color:var(--muted)}
+.item .t{min-width:0}
+.item .t b{font-weight:600}
+.item .t span{color:var(--muted);font-size:14px;margin-left:6px}
+.item .s{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--muted);white-space:nowrap}
+footer{margin-top:22px;font-size:13.5px;color:var(--muted);max-width:70ch}
+a{color:var(--accent2)}
+@media (prefers-reduced-motion: reduce){.st .halo{transition:none}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">JANGZANA Creative Factory</div>
+    <h1>ZANA Creative City</h1>
+    <p class="lead">เมืองผลิตคลิปโฆษณา 10 สถานี งานเดินตามถนนวงแหวนตามเข็มนาฬิกา แล้วผลแอดวนกลับเข้าศาลากลางไปเริ่มรอบใหม่ แตะอาคารเพื่อดูหน้าที่ของแต่ละทีม</p>
+    <div class="row" aria-label="แบรนด์">
+      <span class="chip on">ZANA น้ำหอมเด็ก · pilot</span>
+      <span class="chip ghost">แบรนด์ถัดไป: เปิดหลัง pilot ผ่าน</span>
+    </div>
+    <div class="counts" id="counts"></div>
+  </header>
+
+  <div class="grid">
+    <div class="mapbox">
+      <svg id="city" viewBox="0 0 720 1000" role="group" aria-label="แผนที่เมือง Creative Factory 10 สถานี"></svg>
+      <div class="legend">
+        <span><i class="mark ok"></i>พร้อมใช้</span>
+        <span><i class="mark todo"></i>รอสร้าง</span>
+        <span><i class="mark human"></i>คนทำ</span>
+        <span><i class="dash"></i>ผลแอดวนกลับไปรอบใหม่</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <section class="panel" id="panel" aria-live="polite"></section>
+      <section>
+        <h3>ทั้ง 10 สถานี</h3>
+        <ol class="list" id="list"></ol>
+      </section>
+    </div>
+  </div>
+
+  <footer>
+    สถานะบนแผนที่เป็นค่าที่ตั้งไว้ ณ 10 พ.ย. 2026 ยังไม่ได้เชื่อมข้อมูลสดจากระบบ
+    รายละเอียดกติกาและ Brand Card อยู่ในเอกสาร
+    <a href="https://claude.ai/artifact/11FrKkYkbRXED994BZDdMY">Master Pipeline + Brand Card</a>
+  </footer>
+</div>
+
+<script>
+(function(){
+  var LABEL={ok:'พร้อมใช้',todo:'รอสร้าง',human:'คนทำ'};
+  var S=[
+    {n:1,name:'Scout',sub:'หาเทรนด์',kind:'dome',a:20,w:3,r:1,st:'ok',note:'ตั้งแล้ว รันทุกวัน 05:35 น.',
+      job:'หาข่าว เทรนด์ มุมใหม่ และความเคลื่อนไหวของคู่แข่ง ทุกเช้า',inp:'Brand Card + ผลแอดรอบก่อน',out:'Trend Brief 5–8 หัวข้อ พร้อมลิงก์ที่มา',who:'AI',dir:'02_TrendBrief'},
+    {n:2,name:'Content',sub:'คิดไอเดีย',kind:'gable',a:60,w:2,r:2,st:'ok',note:'ตั้งแล้ว รันต่อจาก Scout',
+      job:'เลือกหัวข้อ คิด hook 3 วินาทีแรก และเขียนสคริปต์',inp:'Trend Brief + Brand Card',out:'5 ไอเดีย พร้อมสคริปต์ 15–30 วินาที',who:'AI',dir:'03_Scripts'},
+    {n:3,name:'Prompt',sub:'เจนฉาก',kind:'saw',a:100,w:4,r:3,st:'ok',note:'ตั้งแล้ว รันต่อจาก Content',
+      job:'หามีม คิดฉาก เขียน prompt เจนภาพและฟุตเทจ',inp:'สคริปต์',out:'Scene List + prompt ต่อฉาก',who:'AI',dir:'04_Footage/GEN, 04_Footage/MEME'},
+    {n:4,name:'Gap Check',sub:'เช็กของขาด',kind:'shed',a:140,w:1,r:4,st:'ok',note:'ตั้งแล้ว ส่ง Shot List ทุกเช้า',
+      job:'เทียบ Scene List กับคลังฟุตเทจ หาฉากที่ยังขาด',inp:'Scene List + คลังฟุตเทจ',out:'Shot List ให้บูมกับน้ำถ่ายเพิ่ม',who:'AI ตรวจ, ทีม Content ถ่าย',dir:'05_ShotList'},
+    {n:5,name:'Editor',sub:'ตัดต่อ',kind:'marquee',a:180,w:3,r:2,st:'todo',note:'ยังไม่มี template ตัดต่อ',
+      job:'ตัดต่อตาม template เมื่อวัตถุดิบครบ',inp:'ฟุตเทจเจน + ฟุตเทจ UGC จริง',out:'คลิปร่างพร้อมแคปชัน',who:'Claude Code',dir:'06_Drafts'},
+    {n:6,name:'อนุมัติ',sub:'ด่านตรวจ',kind:'gate',a:220,w:4,r:1,st:'human',note:'บูมตรวจเองทุกคลิป',
+      job:'ตรวจเคลม แบรนด์ ลิขสิทธิ์ ราคาและโปร',inp:'คลิปร่าง + ลิงก์',out:'ผ่าน / แก้ / ทิ้ง',who:'บูม (งานลูกค้า: ลูกค้าตรวจชั้นที่ 2)',dir:'06_Drafts → 07_Approved'},
+    {n:7,name:'Drive',sub:'คลังคลิป',kind:'columns',a:260,w:1,r:3,st:'todo',note:'ยังไม่ได้สร้างโครงโฟลเดอร์',
+      job:'เก็บคลิปที่ผ่านเข้าคลัง และสรุปงานรายวัน',inp:'คลิปที่ผ่านอนุมัติ',out:'ลิงก์คลัง + Daily Summary',who:'AI',dir:'07_Approved, 08_Reports'},
+    {n:8,name:'Ads',sub:'ยิงแอด',kind:'billboard',a:300,w:2,r:4,st:'human',note:'ทีมแอดเลือกคลิปเอง',
+      job:'เลือกคลิปจากคลังไปสร้างแคมเปญ',inp:'คลังคลิป',out:'แคมเปญที่ยิงจริงในบัญชี Kid02',who:'ทีมแอด',dir:'07_Approved'},
+    {n:9,name:'Report',sub:'วัดผล',kind:'clock',a:340,w:3,r:1,st:'todo',note:'ยังไม่ได้ตั้งรายงาน',
+      job:'สรุปผลหลังยิง 3–5 วัน และตามยอดรับของ COD',inp:'ข้อมูลแอด + ออเดอร์',out:'รายงานผลต่อคลิป',who:'AI',dir:'08_Reports'},
+    {n:10,name:'CEO',sub:'วางแผน',kind:'hall',hall:true,w:1,r:2,st:'human',note:'บูมตัดสินใจรอบถัดไป',
+      job:'ตัดสินใจ scale ปรับ หรือหยุด',inp:'รายงานผล',out:'แผนรอบถัดไป ส่งกลับ Scout และ Content',who:'บูม',dir:'08_Reports'}
+  ];
+  var CX=360, CY=520;
+  S.forEach(function(s){
+    if(s.hall){s.x=CX;s.y=CY;return;}
+    var t=s.a*Math.PI/180;
+    s.x=Math.round(CX+250*Math.sin(t)); s.y=Math.round(CY-360*Math.cos(t));
+  });
+
+  function bld(s){
+    var x=s.x, g=s.y+30;
+    var W='fill="var(--w'+s.w+')" stroke="var(--line)" stroke-width="3" stroke-linejoin="round"';
+    var R='fill="var(--r'+s.r+')" stroke="var(--line)" stroke-width="3" stroke-linejoin="round"';
+    var L='stroke="var(--line)" stroke-width="3" stroke-linecap="round" fill="none"';
+    var WIN='fill="var(--win)" stroke="var(--line)" stroke-width="2.5"';
+    var D='fill="var(--line)"';
+    var o='';
+    function rect(a,b,w,h,attr,rx){return '<rect x="'+a+'" y="'+b+'" width="'+w+'" height="'+h+'" rx="'+(rx||0)+'" '+attr+'/>';}
+    function poly(p,attr){return '<polygon points="'+p+'" '+attr+'/>';}
+    function line(a,b,c,d,attr){return '<line x1="'+a+'" y1="'+b+'" x2="'+c+'" y2="'+d+'" '+attr+'/>';}
+    var door=function(dx){return rect(x+(dx||0)-9,g-26,18,26,D,8);};
+    switch(s.kind){
+      case 'dome':
+        o+=rect(x-44,g-56,88,56,W,4);
+        o+='<path d="M'+(x-40)+','+(g-56)+' A40,38 0 0 1 '+(x+40)+','+(g-56)+' Z" '+R+'/>';
+        o+=rect(x-5,g-92,10,34,WIN,3);
+        o+=line(x+10,g-82,x+36,g-106,'stroke="var(--line)" stroke-width="7" stroke-linecap="round"');
+        o+='<circle cx="'+(x-26)+'" cy="'+(g-34)+'" r="7" '+WIN+'/><circle cx="'+(x+26)+'" cy="'+(g-34)+'" r="7" '+WIN+'/>';
+        o+=door(); break;
+      case 'gable':
+        o+=rect(x+20,g-94,12,26,W,2);
+        o+=rect(x-46,g-52,92,52,W,4);
+        o+=poly((x-56)+','+(g-52)+' '+x+','+(g-98)+' '+(x+56)+','+(g-52),R);
+        o+=rect(x-36,g-40,17,17,WIN,2)+rect(x+19,g-40,17,17,WIN,2);
+        o+=door(); break;
+      case 'saw':
+        o+=rect(x-48,g-50,96,50,W,4);
+        for(var i=0;i<3;i++){var a=x-48+i*32; o+=poly(a+','+(g-50)+' '+a+','+(g-82)+' '+(a+32)+','+(g-50),R);}
+        o+=rect(x-38,g-38,34,22,WIN,2);
+        o+=door(22); break;
+      case 'shed':
+        o+=rect(x-52,g-46,104,46,W,4);
+        o+=rect(x-58,g-58,116,14,R,4);
+        o+=rect(x-40,g-34,46,34,WIN,2);
+        o+=line(x-40,g-23,x+6,g-23,L)+line(x-40,g-12,x+6,g-12,L);
+        o+=rect(x+18,g-20,20,20,'fill="var(--w4)" stroke="var(--line)" stroke-width="2.5"',2);
+        o+=rect(x+24,g-36,16,16,'fill="var(--w2)" stroke="var(--line)" stroke-width="2.5"',2);
+        break;
+      case 'marquee':
+        o+=rect(x-30,g-82,60,24,R,4);
+        o+=rect(x-46,g-60,92,60,W,4);
+        o+=rect(x-52,g-48,104,15,'fill="var(--r4)" stroke="var(--line)" stroke-width="3"',5);
+        for(var j=-2;j<=2;j++){o+='<circle cx="'+(x+j*20)+'" cy="'+(g-40.5)+'" r="3" fill="var(--w1)"/>';}
+        o+=poly((x-7)+','+(g-76)+' '+(x-7)+','+(g-64)+' '+(x+8)+','+(g-70),'fill="var(--w1)"');
+        o+=rect(x-15,g-26,30,26,D,3); break;
+      case 'gate':
+        o+=rect(x-48,g-66,20,66,W,3)+rect(x+28,g-66,20,66,W,3);
+        o+=rect(x-56,g-84,112,20,R,7);
+        o+=line(x-26,g-22,x+26,g-22,'stroke="var(--accent)" stroke-width="9" stroke-linecap="round"');
+        o+=line(x-26,g-22,x+26,g-22,'stroke="var(--w1)" stroke-width="9" stroke-dasharray="9 9" stroke-dashoffset="9"');
+        o+='<polyline points="'+(x-8)+','+(g-74)+' '+(x-2)+','+(g-68)+' '+(x+9)+','+(g-80)+'" stroke="var(--w1)" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
+        break;
+      case 'columns':
+        o+=rect(x-46,g-56,92,46,W,2);
+        o+=poly((x-54)+','+(g-56)+' '+x+','+(g-92)+' '+(x+54)+','+(g-56),R);
+        [-30,-10,10,30].forEach(function(d){o+=line(x+d,g-52,x+d,g-12,'stroke="var(--line)" stroke-width="5" stroke-linecap="round"');});
+        o+=rect(x-54,g-10,108,10,W,3); break;
+      case 'billboard':
+        o+=line(x+16,g-52,x+16,g-74,'stroke="var(--line)" stroke-width="5"');
+        o+=rect(x-36,g-110,74,38,'fill="var(--r2)" stroke="var(--line)" stroke-width="3"',5);
+        o+=poly((x-7)+','+(g-101)+' '+(x-7)+','+(g-81)+' '+(x+11)+','+(g-91),'fill="var(--w1)"');
+        o+=rect(x-40,g-44,80,44,W,4);
+        o+=rect(x-46,g-54,92,13,R,4);
+        o+=rect(x-30,g-34,18,16,WIN,2);
+        o+=door(16); break;
+      case 'clock':
+        o+=rect(x-50,g-40,28,40,W,3)+rect(x+22,g-40,28,40,W,3);
+        o+=rect(x-22,g-96,44,96,W,3);
+        o+=poly((x-29)+','+(g-96)+' '+x+','+(g-126)+' '+(x+29)+','+(g-96),R);
+        o+='<circle cx="'+x+'" cy="'+(g-72)+'" r="13" '+WIN+'/>';
+        o+=line(x,g-72,x,g-81,L)+line(x,g-72,x+7,g-68,L);
+        o+=door(); break;
+      case 'hall':
+        o+=rect(x-74,g-58,148,58,W,4);
+        o+=rect(x-80,g-70,160,15,R,5);
+        o+=rect(x-26,g-112,52,112,W,3);
+        o+=poly((x-34)+','+(g-112)+' '+x+','+(g-152)+' '+(x+34)+','+(g-112),R);
+        o+=line(x,g-152,x,g-178,L);
+        o+=poly(x+','+(g-178)+' '+(x+26)+','+(g-169)+' '+x+','+(g-160),'fill="var(--accent)" stroke="var(--line)" stroke-width="2.5" stroke-linejoin="round"');
+        o+='<circle cx="'+x+'" cy="'+(g-88)+'" r="12" '+WIN+'/>';
+        o+=line(x,g-88,x,g-96,L)+line(x,g-88,x+6,g-85,L);
+        [-60,-40,40,60].forEach(function(d){o+=rect(x+d-7,g-42,14,18,WIN,2);});
+        o+=rect(x-12,g-34,24,34,D,12);
+        o+=rect(x-36,g-5,72,9,W,3); break;
+    }
+    return o;
+  }
+
+  function mark(s,mx,my){
+    if(s.st==='ok') return '<circle cx="'+mx+'" cy="'+my+'" r="7" fill="var(--ok)"/>';
+    if(s.st==='todo') return '<circle cx="'+mx+'" cy="'+my+'" r="6" fill="none" stroke="var(--todo)" stroke-width="3.5"/>';
+    return '<rect x="'+(mx-6.5)+'" y="'+(my-6.5)+'" width="13" height="13" rx="2" fill="var(--human)"/>';
+  }
+
+  function tree(x,y){
+    return '<rect x="'+(x-3)+'" y="'+(y-4)+'" width="6" height="16" rx="2" fill="var(--trunk)"/>'+
+           '<circle cx="'+x+'" cy="'+(y-16)+'" r="17" fill="var(--tree)" stroke="var(--line)" stroke-width="2.5"/>';
+  }
+
+  function draw(){
+    var o='';
+    o+='<rect x="0" y="0" width="720" height="1000" rx="14" fill="var(--ground)"/>';
+    o+='<ellipse cx="'+CX+'" cy="'+CY+'" rx="150" ry="205" fill="var(--plaza)"/>';
+    // avenue from the ring down to the hall
+    o+='<line x1="360" y1="222" x2="360" y2="420" stroke="var(--road)" stroke-width="30" stroke-linecap="round"/>';
+    // ring road
+    o+='<ellipse cx="'+CX+'" cy="'+CY+'" rx="205" ry="300" fill="none" stroke="var(--roadline)" stroke-width="40"/>';
+    o+='<ellipse cx="'+CX+'" cy="'+CY+'" rx="205" ry="300" fill="none" stroke="var(--road)" stroke-width="34"/>';
+    o+='<ellipse cx="'+CX+'" cy="'+CY+'" rx="205" ry="300" fill="none" stroke="var(--roadline)" stroke-width="2.5" stroke-dasharray="10 12"/>';
+    // direction chevrons between stations
+    for(var a=40;a<=320;a+=40){
+      var t=a*Math.PI/180, px=CX+205*Math.sin(t), py=CY-300*Math.cos(t);
+      var rot=Math.atan2(300*Math.sin(t),205*Math.cos(t))*180/Math.PI;
+      o+='<path d="M-7,-8 L5,0 L-7,8" transform="translate('+px.toFixed(1)+','+py.toFixed(1)+') rotate('+rot.toFixed(1)+')" fill="none" stroke="var(--accent2)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>';
+    }
+    o+='<path d="M-8,-7 L0,5 L8,-7" transform="translate(360,305)" fill="none" stroke="var(--accent2)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>';
+    // feedback loop: hall back to Scout
+    o+='<path d="M436,470 C505,425 505,335 456,268" fill="none" stroke="var(--accent)" stroke-width="4" stroke-dasharray="10 9" stroke-linecap="round"/>';
+    o+='<path d="M-8,6 L0,-6 L8,6" transform="translate(456,268) rotate(-28)" fill="none" stroke="var(--accent)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>';
+    [[58,118],[664,130],[40,462],[682,470],[62,948],[660,948],[252,672],[468,672],[248,408]].forEach(function(p){o+=tree(p[0],p[1]);});
+    S.forEach(function(s){
+      var x=s.x, g=s.y+30, hw=s.hall?96:70;
+      o+='<g class="st" data-n="'+s.n+'" tabindex="0" role="button" aria-label="สถานี '+s.n+' '+s.name+' '+s.sub+' สถานะ '+LABEL[s.st]+'">';
+      o+='<ellipse class="halo" cx="'+x+'" cy="'+g+'" rx="'+hw+'" ry="17" fill="var(--accent)" fill-opacity=".28" stroke="var(--accent)" stroke-width="3"/>';
+      o+='<ellipse cx="'+x+'" cy="'+(g+2)+'" rx="'+(hw-14)+'" ry="8" fill="var(--shade)"/>';
+      o+=bld(s);
+      o+='<rect class="pill" x="'+(x-76)+'" y="'+(g+11)+'" width="152" height="34" rx="17" fill="var(--surface)" stroke="var(--line)" stroke-width="2"/>';
+      o+='<circle cx="'+(x-58)+'" cy="'+(g+28)+'" r="12.5" fill="var(--accent2)"/>';
+      o+='<text x="'+(x-58)+'" y="'+(g+28)+'" text-anchor="middle" dominant-baseline="central" font-size="15" font-weight="600" fill="var(--surface)">'+s.n+'</text>';
+      o+='<text x="'+(x-40)+'" y="'+(g+28)+'" dominant-baseline="central" font-size="20" font-weight="500" fill="var(--fg)">'+s.name+'</text>';
+      o+=mark(s,x+58,g+28);
+      o+='</g>';
+    });
+    document.getElementById('city').innerHTML=o;
+  }
+
+  function esc(t){return String(t).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+
+  var current=1;
+  function select(n,fromMap){
+    current=n;
+    var s=S[n-1], nx=S[n%10];
+    document.querySelectorAll('.st').forEach(function(el){el.classList.toggle('sel',+el.dataset.n===n);});
+    document.querySelectorAll('.item').forEach(function(el){
+      var on=+el.dataset.n===n; el.classList.toggle('sel',on); el.setAttribute('aria-pressed',on?'true':'false');
+    });
+    var dirs=s.dir.split(', ').map(function(d){return '<code>'+esc(d)+'</code>';}).join(' ');
+    document.getElementById('panel').innerHTML=
+      '<div class="num">สถานี '+s.n+' จาก 10</div>'+
+      '<h2>'+esc(s.name)+' · '+esc(s.sub)+'</h2>'+
+      '<div class="state '+s.st+'"><i class="mark '+s.st+'"></i><strong>'+LABEL[s.st]+'</strong><span>'+esc(s.note)+'</span></div>'+
+      '<dl>'+
+        '<div><dt>ทำอะไร</dt><dd>'+esc(s.job)+'</dd></div>'+
+        '<div><dt>รับเข้า</dt><dd>'+esc(s.inp)+'</dd></div>'+
+        '<div><dt>ส่งออก</dt><dd>'+esc(s.out)+'</dd></div>'+
+        '<div><dt>ใครทำ</dt><dd>'+esc(s.who)+'</dd></div>'+
+        '<div><dt>โฟลเดอร์งานใน Drive</dt><dd>'+dirs+'</dd></div>'+
+      '</dl>'+
+      '<button class="next" id="next" type="button">สถานีถัดไป: '+esc(nx.name)+'</button>';
+    document.getElementById('next').addEventListener('click',function(){select(nx.n,false);});
+    if(fromMap && window.matchMedia('(max-width: 879px)').matches){
+      var calm=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      document.getElementById('panel').scrollIntoView({block:'nearest',behavior:calm?'auto':'smooth'});
+    }
+  }
+
+  function lists(){
+    var c={ok:0,todo:0,human:0};
+    S.forEach(function(s){c[s.st]++;});
+    document.getElementById('counts').innerHTML=['ok','human','todo'].map(function(k){
+      return '<span class="row"><i class="mark '+k+'"></i><b>'+c[k]+'</b> '+LABEL[k]+'</span>';
+    }).join('');
+    document.getElementById('list').innerHTML=S.map(function(s){
+      return '<li><button class="item" type="button" id="item-'+s.n+'" data-n="'+s.n+'" aria-pressed="false">'+
+        '<span class="n">'+s.n+'</span>'+
+        '<span class="t"><b>'+esc(s.name)+'</b><span>'+esc(s.sub)+'</span></span>'+
+        '<span class="s"><i class="mark '+s.st+'"></i>'+LABEL[s.st]+'</span></button></li>';
+    }).join('');
+    document.querySelectorAll('.item').forEach(function(el){
+      el.addEventListener('click',function(){select(+el.dataset.n,false);});
+    });
+  }
+
+  draw(); lists();
+  var city=document.getElementById('city');
+  city.addEventListener('click',function(e){
+    var g=e.target.closest('.st'); if(g) select(+g.dataset.n,true);
+  });
+  city.addEventListener('keydown',function(e){
+    if(e.key!=='Enter' && e.key!==' ') return;
+    var g=e.target.closest('.st'); if(g){e.preventDefault(); select(+g.dataset.n,true);}
+  });
+  select(1,false);
+})();
+</script>
+
+</body>
+</html>
