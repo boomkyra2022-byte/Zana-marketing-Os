@@ -5,6 +5,7 @@ import CreativeGeneratorClient from '@/components/creative-generator-client';
 import BannerGeneratorClient from '@/components/banner-generator-client';
 import CaptionGeneratorClient from '@/components/caption-generator-client';
 import VisualHookBannerClient from '@/components/visual-hook-banner-client';
+import CreativeOffice, { type OfficeData } from '@/components/creative-office';
 
 // Explicit user request: "เพิ่มลงในหน้านี้ได้ไหม
 // https://os.zanadynasty.site/creative-generator ทำเป็นอีก 1 หัวข้อ" — the
@@ -37,7 +38,9 @@ import VisualHookBannerClient from '@/components/visual-hook-banner-client';
 //   ideas, etc. — this tab doesn't actually run)
 // - "คิดแคปชั่น" = unchanged, kept after the 5 Modes per spec
 
-type PageTab = 'pipeline' | 'visual_hook_banner' | 'banner' | 'ecommerce_image' | 'reels_video' | 'caption';
+// 'office' = ห้องทำงานจำลอง: every tool above drawn as an agent at a desk
+// (components/creative-office.tsx), with real progress from the same data.
+type PageTab = 'pipeline' | 'visual_hook_banner' | 'banner' | 'ecommerce_image' | 'reels_video' | 'caption' | 'office';
 
 interface ProductRecord {
   id: string;
@@ -85,6 +88,7 @@ interface Props {
   models: ModelPresetRecord[];
   initialIdea: any | null;
   initialScript: any | null;
+  officeData: OfficeData;
 }
 
 export default function CreativeGeneratorPageClient({
@@ -97,7 +101,8 @@ export default function CreativeGeneratorPageClient({
   recentStoryboards,
   models,
   initialIdea,
-  initialScript
+  initialScript,
+  officeData
 }: Props) {
   const [tab, setTab] = useState<PageTab>('pipeline');
 
@@ -122,7 +127,12 @@ export default function CreativeGeneratorPageClient({
         <button type="button" className={`btn-secondary ${tab === 'caption' ? 'ring-2 ring-blue-500' : ''}`} onClick={() => setTab('caption')}>
           คิดแคปชั่น
         </button>
+        <button type="button" className={`btn-secondary ${tab === 'office' ? 'ring-2 ring-blue-500' : ''}`} onClick={() => setTab('office')}>
+          ห้องทำงานจำลอง
+        </button>
       </div>
+
+      {tab === 'office' && <CreativeOffice data={officeData} onOpenTab={setTab} />}
 
       {tab === 'pipeline' && (
         <CreativeGeneratorClient

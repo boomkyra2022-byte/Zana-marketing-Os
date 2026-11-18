@@ -46,7 +46,7 @@ const WALK_SECONDS = 48;
 // Where walkers stand when motion is off (SSR, reduced motion).
 const STATIC_WALKERS: [number, number][] = [[240, 388], [672, 520], [350, 648], [470, 908], [702, 600], [160, 190]];
 
-function starburst(cx: number, cy: number, r: number, inner: number, n = 10) {
+export function starburst(cx: number, cy: number, r: number, inner: number, n = 10) {
   const pts: string[] = [];
   for (let i = 0; i < n * 2; i++) {
     const t = (i / (n * 2)) * Math.PI * 2 - Math.PI / 2;
@@ -75,7 +75,7 @@ const AURA_INNER = flame(21, 32, 9, 11);
 
 type AgentLook = 'ai' | 'human' | 'ghost';
 
-function Agent({ x, y, look, aura, carry, scale = 1, color = 'var(--cc-r1)' }: {
+export function Agent({ x, y, look, aura, carry, scale = 1, color = 'var(--cc-r1)' }: {
   x: number; y: number; look: AgentLook; aura?: boolean; carry?: boolean; scale?: number; color?: string;
 }) {
   const tf = `translate(${x},${y})${scale !== 1 ? ` scale(${scale})` : ''}`;

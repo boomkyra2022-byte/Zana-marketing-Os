@@ -22,7 +22,10 @@ export default async function CreativeGeneratorPage({
     { data: recentIdeas },
     { data: recentScripts },
     { data: recentStoryboards },
-    { data: models }
+    { data: models },
+    { data: visualIdeas },
+    { data: visualGenerations },
+    { data: captionRuns }
   ] = await Promise.all([
     // Extra columns beyond id/product_name/brand are for the Banner
     // Generator's "เลือกสินค้าจากคลัง" autofill (explicit user request) —
@@ -35,7 +38,7 @@ export default async function CreativeGeneratorPage({
       )
       .order('created_at', { ascending: false }),
     supabase.from('personas').select('id, name').order('created_at', { ascending: false }),
-    supabase.from('banner_generator_jobs').select('id, product_name, template, image_count, created_at').order('created_at', { ascending: false }).limit(10),
+    supabase.from('banner_generator_jobs').select('id, product_name, template, image_count, result_paths, created_at').order('created_at', { ascending: false }).limit(10),
     // Same request: pull Knowledge Base facts linked to a product (verified
     // selling points / compliance notes) so picking a product also surfaces
     // anything the team has logged there, not just the Products table.
@@ -62,7 +65,24 @@ export default async function CreativeGeneratorPage({
       .from('model_presets')
       .select('id, name, type, identity_lock, identity_prompt, locked_features, editable_features, reference_images')
       .eq('active', true)
+      .order('created_at', { ascending: false }),
+    // ห้องทำงานจำลอง (office view tab): latest work of the tools that don't
+    // already have a history list above, so each desk can show real
+    // progress. Small capped reads; a failed read just leaves that desk on
+    // its DEMO state.
+    supabase.from('visual_ideas').select('id, title, created_at').order('created_at', { ascending: false }).limit(10),
+    supabase
+      .from('generation_logs')
+      .select('id, status, image_count, error, created_at')
+      .eq('mode', 'visual_hook_banner')
       .order('created_at', { ascending: false })
+      .limit(10),
+    supabase
+      .from('activity_logs')
+      .select('id, new_value, reason, created_at')
+      .eq('action', 'ai_generate_captions')
+      .order('created_at', { ascending: false })
+      .limit(5)
   ]);
 
   // Deep-link reuse from /content-library ("ใช้ต่อ" there navigates here with
@@ -103,6 +123,15 @@ export default async function CreativeGeneratorPage({
           models={models ?? []}
           initialIdea={initialIdea}
           initialScript={initialScript}
+          officeData={{
+            ideas: recentIdeas ?? [],
+            scripts: recentScripts ?? [],
+            storyboards: recentStoryboards ?? [],
+            bannerJobs: bannerHistory ?? [],
+            visualIdeas: visualIdeas ?? [],
+            visualGenerations: visualGenerations ?? [],
+            captionRuns: captionRuns ?? []
+          }}
         />
       )}
     </div>
