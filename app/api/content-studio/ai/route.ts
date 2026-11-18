@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
-import { callOpenAIJSON, AIProviderError } from '@/lib/ai/openai';
+import { callOpenAIJSON, callOpenAIWebSearch, AIProviderError } from '@/lib/ai/openai';
 import {
   buildAutofillPrompt,
   buildContentStudioPrompt,
+  buildTrendScoutPrompt,
   PROMPT_VERSION_CONTENT_STUDIO,
-  STUDIO_FIELDS
+  STUDIO_FIELDS,
+  STUDIO_FORMATS,
+  type TrendResearch
 } from '@/prompts/content-studio';
 
 // Content Studio AI — two modes in one function (Vercel function count):
@@ -15,8 +18,8 @@ import {
 //   mode "autofill": raw pasted client info → Brand Card fields
 //
 // generate + `stream: true` answers with NDJSON instead of one JSON body:
-// one {"type":"stage"} line as each real step starts (brand → examples →
-// write → check), then {"type":"done", items, ...} or {"type":"error", error}.
+// one {"type":"stage"} line as each real step starts (brand → [scout] →
+// examples → write → check), then {"type":"done", items, ...} or {"type":"error", error}.
 // The Content Studio nail-salon scene (components/content-studio-salon.tsx)
 // moves its agents on these lines. Without `stream` the response is the same
 // single JSON as before.
@@ -67,6 +70,35 @@ async function runGenerate(supabase: Supabase, userId: string, data: z.infer<typ
   const { data: client, error: cErr } = await supabase.from('studio_clients').select('*').eq('id', data.client_id).maybeSingle();
   if (cErr || !client) throw new StepError('ไม่พบลูกค้า', 404);
 
+  // Trend Scout (planning formats): search the web for current trends and
+  // upcoming dates. A failed search does not stop the brief — it continues
+  // with every trend marked [ต้องเช็ก] — except a bad key / no credit, which
+  // would fail the writing step anyway.
+  const fmt = STUDIO_FORMATS.find((f) => f.id === data.format);
+  let research: TrendResearch | null = null;
+  let recentThemes: string[] = [];
+  if (fmt?.research) {
+    emit({ type: 'stage', stage: 'scout' });
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const [found, recent] = await Promise.all([
+      (async () => {
+        try {
+          const { instructions, input } = buildTrendScoutPrompt(client, data.format);
+          const r = await callOpenAIWebSearch({ instructions, input, timeoutMs: 60000 });
+          return { text: r.text.slice(0, 8000), sources: r.sources.slice(0, 15) };
+        } catch (err) {
+          if (err instanceof AIProviderError && (err.status === 429 || /API key/i.test(err.message))) throw err;
+          console.error('[content-studio] trend scout failed:', err);
+          return null;
+        }
+      })(),
+      supabase.from('studio_posts').select('title').eq('client_id', client.id).in('format', ['brief_week', 'plan30', 'plan7', 'mu_week', 'collection']).gte('created_at', since).limit(10)
+    ]);
+    research = found;
+    recentThemes = (recent.data ?? []).map((x) => x.title);
+    emit({ type: 'stage', stage: 'scouted', ok: !!research, sources: research?.sources.length ?? 0 });
+  }
+
   // Few-shot: the latest approved/used pieces of the same format for this client.
   emit({ type: 'stage', stage: 'examples' });
   const { data: ex } = await supabase
@@ -84,7 +116,9 @@ async function runGenerate(supabase: Supabase, userId: string, data: z.infer<typ
     funnel: data.funnel,
     topic: data.topic,
     count: data.count,
-    examples: (ex ?? []).map((x) => ({ title: x.title, body: x.body }))
+    examples: (ex ?? []).map((x) => ({ title: x.title, body: x.body })),
+    research,
+    recentThemes
   });
 
   emit({ type: 'stage', stage: 'write', examples: ex?.length ?? 0, count });
@@ -109,7 +143,7 @@ async function runGenerate(supabase: Supabase, userId: string, data: z.infer<typ
     reason: `Content Studio: ${items.data.items.length} pieces for ${client.name}`
   });
 
-  return { items: items.data.items.slice(0, count), model, prompt_version: PROMPT_VERSION_CONTENT_STUDIO };
+  return { items: items.data.items.slice(0, count), model, prompt_version: PROMPT_VERSION_CONTENT_STUDIO, sources: research?.sources ?? [] };
 }
 
 function streamGenerate(run: (emit: Emit) => Promise<Record<string, unknown>>) {
