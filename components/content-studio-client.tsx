@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { StudioClient, StudioPost, StudioRetention } from '@/types/database';
 import {
   STUDIO_FIELDS,
@@ -9,6 +9,7 @@ import {
   STUDIO_FUNNEL,
   type StudioFormat
 } from '@/prompts/content-studio';
+import ContentStudioSalon, { useSalonRun, type SalonInfo } from '@/components/content-studio-salon';
 
 interface Props {
   initialClients: StudioClient[];
@@ -42,6 +43,46 @@ async function api<T>(url: string, method: string, body: unknown): Promise<T> {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json?.error || `เกิดข้อผิดพลาด (${res.status})`);
   return json as T;
+}
+
+type GenItem = { title: string; body: string; retention?: StudioRetention | null };
+
+// Generate with stage streaming: the API sends one NDJSON line per real step
+// (brand → examples → write → check) so the nail-salon scene can move the
+// agent of the step that is running, then the items (or a Thai error).
+async function generateStream(body: Record<string, unknown>, onStage: (e: { stage: string; examples?: number; count?: number }) => void): Promise<GenItem[]> {
+  const res = await fetch('/api/content-studio/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...body, stream: true }) });
+  if (!res.ok || !res.body || !(res.headers.get('content-type') ?? '').includes('ndjson')) {
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.error || `เกิดข้อผิดพลาด (${res.status})`);
+    if (Array.isArray(json?.items)) return json.items;
+    throw new Error('AI ตอบกลับมาไม่ครบ ลองกดสร้างใหม่');
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (value) buf += dec.decode(value, { stream: !done });
+    let nl = buf.indexOf('\n');
+    while (nl >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      nl = buf.indexOf('\n');
+      if (!line) continue;
+      let e: any;
+      try {
+        e = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (e.type === 'stage') onStage(e);
+      else if (e.type === 'error') throw new Error(e.error || 'เกิดข้อผิดพลาด ลองอีกครั้ง');
+      else if (e.type === 'done') return e.items as GenItem[];
+    }
+    if (done) break;
+  }
+  throw new Error('การเชื่อมต่อขาดระหว่างทาง ลองกดสร้างใหม่');
 }
 
 function scoreClass(s: number) {
@@ -91,11 +132,32 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
   const [libStatus, setLibStatus] = useState<'all' | Status>('all');
   const [editPost, setEditPost] = useState<{ id: string; body: string } | null>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  const salon = useSalonRun();
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   const client = clients.find((c) => c.id === sel) ?? null;
   const clientPosts = useMemo(() => posts.filter((p) => p.client_id === sel), [posts, sel]);
   const fmtObj = STUDIO_FORMATS.find((f) => f.id === fmt) as StudioFormat;
   const approvedSame = clientPosts.filter((p) => p.format === fmt && p.status !== 'draft').length;
+  const scored = drafts.filter((d) => d.retention);
+  const salonInfo: SalonInfo = {
+    clientName: tab === 'form' ? form.name?.trim() || null : client?.name ?? null,
+    clientCount: clients.length,
+    cardFilled: STUDIO_FIELDS.filter((f) => String((tab === 'form' ? form[f.key] : (client as any)?.[f.key]) ?? '').trim()).length,
+    cardTotal: STUDIO_FIELDS.length,
+    positioning: (tab === 'form' ? form.positioning : client?.positioning)?.split('\n')[0] || null,
+    formatName: FMT[fmt] ?? fmt,
+    funnelName: FUNNEL[funnel] ?? funnel,
+    topic: topic.trim(),
+    count: fmtObj?.single ? 1 : count,
+    examples: approvedSame,
+    libTotal: clientPosts.length,
+    libApproved: clientPosts.filter((p) => p.status === 'approved').length,
+    libUsed: clientPosts.filter((p) => p.status === 'used').length,
+    unsaved: drafts.filter((d) => !d.saved).length,
+    avgScore: scored.length ? Math.round((scored.reduce((a, d) => a + (d.retention?.score ?? 0), 0) / scored.length) * 10) / 10 : null
+  };
+  const showResults = () => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   function flash(m: string) {
     setMsg(m);
@@ -127,6 +189,8 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     if (!raw.trim()) return setErr('วางข้อมูลลูกค้าก่อน');
     setBusy('autofill');
     setErr('');
+    salon.start('autofill', ['reception', 'brand'], `รับข้อมูลดิบ ${raw.trim().length.toLocaleString('th-TH')} ตัวอักษร`);
+    salon.step('brand', 'AI กำลังกรอก Brand Card…');
     try {
       const { fields } = await api<{ fields: Record<string, string> }>('/api/content-studio/ai', 'POST', { mode: 'autofill', raw });
       setForm((f) => {
@@ -135,8 +199,10 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
         return next;
       });
       flash('กรอกให้แล้ว ตรวจและแก้ก่อนกดบันทึก');
+      salon.finish(`กรอกให้ ${Object.values(fields).filter(Boolean).length} ช่อง ตรวจก่อนบันทึก`);
     } catch (e: any) {
       setErr(e.message);
+      salon.fail(e.message);
     }
     setBusy(null);
   }
@@ -145,6 +211,7 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     if (!form.name?.trim()) return setErr('ใส่ชื่อแบรนด์ก่อน');
     setBusy('card');
     setErr('');
+    salon.start('card', ['brand'], `บันทึก Brand Card ${form.name.trim()}…`);
     const payload = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, v.trim()]));
     try {
       if (editingCard) {
@@ -152,15 +219,18 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
         setClients((cs) => cs.map((x) => (x.id === c.id ? c : x)));
         setTab('card');
         flash('บันทึก Brand Card แล้ว');
+        salon.finish('บันทึก Brand Card แล้ว');
       } else {
         const { client: c } = await api<{ client: StudioClient }>('/api/content-studio/clients', 'POST', payload);
         setClients((cs) => [...cs, c].sort((a, b) => a.name.localeCompare(b.name, 'th')));
         setSel(c.id);
         setTab('create');
         flash('เพิ่มลูกค้าแล้ว');
+        salon.finish(`เปิดแฟ้มลูกค้าใหม่ ${c.name} แล้ว`);
       }
     } catch (e: any) {
       setErr(e.message);
+      salon.fail(e.message);
     }
     setBusy(null);
   }
@@ -189,15 +259,24 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     setBusy('gen');
     setErr('');
     setDrafts([]);
+    const want = fmtObj?.single ? 1 : count;
+    salon.start('generate', ['reception', 'brand', 'design', 'nail', 'qc'], `รับ brief: ${FMT[fmt] ?? fmt} · ${FUNNEL[funnel] ?? funnel}${topic.trim() ? ` · ${topic.trim()}` : ''}`);
     try {
-      const { items } = await api<{ items: { title: string; body: string; retention?: StudioRetention | null }[] }>(
-        '/api/content-studio/ai',
-        'POST',
-        { mode: 'generate', client_id: client.id, format: fmt, funnel, topic, count }
-      );
+      const items = await generateStream({ mode: 'generate', client_id: client.id, format: fmt, funnel, topic, count }, (e) => {
+        if (e.stage === 'brand') salon.step('brand', `เปิด Brand Card ของ ${client.name}`);
+        else if (e.stage === 'examples') salon.step('design', 'หาลายตัวอย่างที่อนุมัติแล้ว…');
+        else if (e.stage === 'write') {
+          salon.step('design', e.examples ? `ได้ลายตัวอย่าง ${e.examples} ชิ้น วางโครงแล้ว` : 'ยังไม่มีลายที่อนุมัติ ใช้แกนคอนเทนต์แทน');
+          salon.step('nail', `AI กำลังเขียน ${e.count ?? want} ชิ้น…`);
+        } else if (e.stage === 'check') salon.step('qc', 'ตรวจงาน + คะแนนดึงคนดู…');
+      });
       setDrafts(items.map((x) => ({ title: x.title, body: x.body, retention: x.retention ?? null, format: fmt, funnel, topic: topic.trim(), saved: false })));
+      const sc = items.filter((x) => x.retention);
+      const avg = sc.length ? Math.round((sc.reduce((a, x) => a + (x.retention?.score ?? 0), 0) / sc.length) * 10) / 10 : null;
+      salon.finish(`ได้ ${items.length} ชิ้น${avg !== null ? ` เฉลี่ย ${avg}/10` : ''}`);
     } catch (e: any) {
       setErr(e.message);
+      salon.fail(e.message);
     }
     setBusy(null);
   }
@@ -205,6 +284,7 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
   async function saveDraft(i: number, status: Status) {
     if (!client) return;
     const d = drafts[i];
+    salon.start('save', ['showcase'], `เก็บ "${d.title}" เข้าคลัง…`);
     try {
       const { post } = await api<{ post: StudioPost }>('/api/content-studio/posts', 'POST', {
         client_id: client.id,
@@ -219,8 +299,10 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
       setPosts((ps) => [post, ...ps]);
       setDrafts((ds) => ds.map((x, j) => (j === i ? { ...x, saved: true } : x)));
       flash(status === 'approved' ? 'อนุมัติและเก็บเข้าคลังแล้ว' : 'เก็บเข้าคลังแล้ว');
+      salon.finish(status === 'approved' ? 'อนุมัติ + ขึ้นตู้โชว์แล้ว' : 'เก็บเข้าคลังแล้ว (ร่าง)');
     } catch (e: any) {
       setErr(e.message);
+      salon.fail(e.message);
     }
   }
 
@@ -316,6 +398,7 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
                 </div>
               </div>
             )}
+            <ContentStudioSalon run={salon.run} info={salonInfo} />
             <div className="grid gap-3 sm:grid-cols-2">
               {STUDIO_FIELDS.map((f) => (
                 <label key={f.key} htmlFor={`cs-${f.key}`} className={`flex flex-col gap-1 text-sm font-semibold ${f.big ? 'sm:col-span-2' : ''}`}>
@@ -433,8 +516,10 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
                     : 'ทิป: กด "อนุมัติ" ชิ้นที่ชอบ ระบบจะใช้เป็นตัวอย่างสไตล์ของลูกค้ารายนี้ในครั้งต่อไป'}
                 </p>
 
+                <ContentStudioSalon run={salon.run} info={salonInfo} onShowResults={drafts.length ? showResults : undefined} />
+
                 {drafts.length > 0 && (
-                  <div className="flex flex-col gap-3">
+                  <div ref={resultsRef} className="flex flex-col gap-3 scroll-mt-4">
                     <h3 className="font-bold">ผลลัพธ์</h3>
                     {drafts.map((d, i) => (
                       <article key={i} className="rounded-xl border border-[var(--border)] bg-white p-4 flex flex-col gap-3">

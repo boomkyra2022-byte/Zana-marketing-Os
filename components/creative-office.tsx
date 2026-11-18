@@ -122,12 +122,12 @@ interface Handoff {
 // ---------- text helpers ----------
 
 const THAI_MARK = /[ัิ-ฺ็-๎]/;
-function visLen(s: string) {
+export function visLen(s: string) {
   let n = 0;
   for (const ch of s) if (!THAI_MARK.test(ch)) n++;
   return n;
 }
-function clip(s: string, max: number) {
+export function clip(s: string, max: number) {
   if (visLen(s) <= max) return s;
   let out = '';
   let n = 0;

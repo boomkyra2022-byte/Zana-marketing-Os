@@ -13,6 +13,13 @@ import {
 //   mode "generate": Brand Card + approved examples → N pieces with a
 //                    retention self-check per piece
 //   mode "autofill": raw pasted client info → Brand Card fields
+//
+// generate + `stream: true` answers with NDJSON instead of one JSON body:
+// one {"type":"stage"} line as each real step starts (brand → examples →
+// write → check), then {"type":"done", items, ...} or {"type":"error", error}.
+// The Content Studio nail-salon scene (components/content-studio-salon.tsx)
+// moves its agents on these lines. Without `stream` the response is the same
+// single JSON as before.
 export const runtime = 'nodejs';
 
 const generateSchema = z.object({
@@ -21,7 +28,8 @@ const generateSchema = z.object({
   format: z.string().min(1).max(50),
   funnel: z.enum(['tofu', 'mofu', 'bofu']).default('tofu'),
   topic: z.string().max(2000).default(''),
-  count: z.number().int().min(1).max(5).default(3)
+  count: z.number().int().min(1).max(5).default(3),
+  stream: z.boolean().optional()
 });
 const autofillSchema = z.object({ mode: z.literal('autofill'), raw: z.string().min(1).max(40000) });
 
@@ -36,6 +44,92 @@ const itemSchema = z.object({
     .nullable()
     .optional()
 });
+
+type Emit = (event: Record<string, unknown>) => void;
+type Supabase = ReturnType<typeof createClient>;
+
+// A generate step that failed with a user-facing Thai message + HTTP status.
+class StepError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function errorOf(err: unknown): { message: string; status: number } {
+  if (err instanceof StepError || err instanceof AIProviderError) return { message: err.message, status: err.status };
+  return { message: 'เกิดข้อผิดพลาด ลองอีกครั้ง', status: 500 };
+}
+
+async function runGenerate(supabase: Supabase, userId: string, data: z.infer<typeof generateSchema>, emit: Emit) {
+  emit({ type: 'stage', stage: 'brand' });
+  const { data: client, error: cErr } = await supabase.from('studio_clients').select('*').eq('id', data.client_id).maybeSingle();
+  if (cErr || !client) throw new StepError('ไม่พบลูกค้า', 404);
+
+  // Few-shot: the latest approved/used pieces of the same format for this client.
+  emit({ type: 'stage', stage: 'examples' });
+  const { data: ex } = await supabase
+    .from('studio_posts')
+    .select('title, body')
+    .eq('client_id', client.id)
+    .eq('format', data.format)
+    .in('status', ['approved', 'used'])
+    .order('updated_at', { ascending: false })
+    .limit(3);
+
+  const { system, user: userPrompt, count } = buildContentStudioPrompt({
+    client,
+    formatId: data.format,
+    funnel: data.funnel,
+    topic: data.topic,
+    count: data.count,
+    examples: (ex ?? []).map((x) => ({ title: x.title, body: x.body }))
+  });
+
+  emit({ type: 'stage', stage: 'write', examples: ex?.length ?? 0, count });
+  const { text, model } = await callOpenAIJSON({ system, user: userPrompt, temperature: 0.85, timeoutMs: 90000 });
+
+  emit({ type: 'stage', stage: 'check' });
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(text);
+  } catch {
+    throw new StepError('AI ตอบกลับมาไม่ใช่ JSON ลองกดสร้างใหม่', 502);
+  }
+  const items = z.object({ items: z.array(itemSchema) }).safeParse(parsedJson);
+  if (!items.success || !items.data.items.length) throw new StepError('AI ตอบกลับมาไม่ครบ ลองกดสร้างใหม่', 502);
+
+  await supabase.from('activity_logs').insert({
+    user_id: userId,
+    action: 'ai_content_studio_generate',
+    entity_type: 'studio_client',
+    entity_id: client.id,
+    new_value: { provider: 'openai', model, prompt_version: PROMPT_VERSION_CONTENT_STUDIO, format: data.format, funnel: data.funnel, count: items.data.items.length },
+    reason: `Content Studio: ${items.data.items.length} pieces for ${client.name}`
+  });
+
+  return { items: items.data.items.slice(0, count), model, prompt_version: PROMPT_VERSION_CONTENT_STUDIO };
+}
+
+function streamGenerate(run: (emit: Emit) => Promise<Record<string, unknown>>) {
+  const enc = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const emit: Emit = (event) => controller.enqueue(enc.encode(JSON.stringify(event) + '\n'));
+      try {
+        emit({ type: 'done', ...(await run(emit)) });
+      } catch (err) {
+        const { message, status } = errorOf(err);
+        emit({ type: 'error', error: message, status });
+      }
+      controller.close();
+    }
+  });
+  return new Response(stream, {
+    headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Accel-Buffering': 'no' }
+  });
+}
 
 export async function POST(request: Request) {
   const supabase = createClient();
@@ -61,50 +155,10 @@ export async function POST(request: Request) {
     const input = generateSchema.safeParse(body);
     if (!input.success) return NextResponse.json({ error: 'คำขอไม่ถูกต้อง', details: input.error.flatten() }, { status: 400 });
 
-    const { data: client, error: cErr } = await supabase.from('studio_clients').select('*').eq('id', input.data.client_id).maybeSingle();
-    if (cErr || !client) return NextResponse.json({ error: 'ไม่พบลูกค้า' }, { status: 404 });
-
-    // Few-shot: the latest approved/used pieces of the same format for this client.
-    const { data: ex } = await supabase
-      .from('studio_posts')
-      .select('title, body')
-      .eq('client_id', client.id)
-      .eq('format', input.data.format)
-      .in('status', ['approved', 'used'])
-      .order('updated_at', { ascending: false })
-      .limit(3);
-
-    const { system, user: userPrompt, count } = buildContentStudioPrompt({
-      client,
-      formatId: input.data.format,
-      funnel: input.data.funnel,
-      topic: input.data.topic,
-      count: input.data.count,
-      examples: (ex ?? []).map((x) => ({ title: x.title, body: x.body }))
-    });
-
-    const { text, model } = await callOpenAIJSON({ system, user: userPrompt, temperature: 0.85, timeoutMs: 90000 });
-    let parsedJson: unknown;
-    try {
-      parsedJson = JSON.parse(text);
-    } catch {
-      return NextResponse.json({ error: 'AI ตอบกลับมาไม่ใช่ JSON ลองกดสร้างใหม่' }, { status: 502 });
-    }
-    const items = z.object({ items: z.array(itemSchema) }).safeParse(parsedJson);
-    if (!items.success || !items.data.items.length) return NextResponse.json({ error: 'AI ตอบกลับมาไม่ครบ ลองกดสร้างใหม่' }, { status: 502 });
-
-    await supabase.from('activity_logs').insert({
-      user_id: user.id,
-      action: 'ai_content_studio_generate',
-      entity_type: 'studio_client',
-      entity_id: client.id,
-      new_value: { provider: 'openai', model, prompt_version: PROMPT_VERSION_CONTENT_STUDIO, format: input.data.format, funnel: input.data.funnel, count: items.data.items.length },
-      reason: `Content Studio: ${items.data.items.length} pieces for ${client.name}`
-    });
-
-    return NextResponse.json({ items: items.data.items.slice(0, count), model, prompt_version: PROMPT_VERSION_CONTENT_STUDIO });
+    if (input.data.stream) return streamGenerate((emit) => runGenerate(supabase, user.id, input.data, emit));
+    return NextResponse.json(await runGenerate(supabase, user.id, input.data, () => {}));
   } catch (err) {
-    if (err instanceof AIProviderError) return NextResponse.json({ error: err.message }, { status: err.status });
-    return NextResponse.json({ error: 'เกิดข้อผิดพลาด ลองอีกครั้ง' }, { status: 500 });
+    const { message, status } = errorOf(err);
+    return NextResponse.json({ error: message }, { status });
   }
 }
