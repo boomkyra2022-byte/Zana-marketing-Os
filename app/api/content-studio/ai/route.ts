@@ -92,7 +92,7 @@ async function runGenerate(supabase: Supabase, userId: string, data: z.infer<typ
           return null;
         }
       })(),
-      supabase.from('studio_posts').select('title').eq('client_id', client.id).in('format', ['brief_week', 'plan30', 'plan7']).gte('created_at', since).limit(10)
+      supabase.from('studio_posts').select('title').eq('client_id', client.id).in('format', ['brief_week', 'plan30', 'plan7', 'mu_week', 'collection']).gte('created_at', since).limit(10)
     ]);
     research = found;
     recentThemes = (recent.data ?? []).map((x) => x.title);
