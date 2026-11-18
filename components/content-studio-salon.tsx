@@ -69,6 +69,7 @@ export interface SalonWeek {
   startLabel: string; // e.g. "จ. 16 พ.ย."
   isMonday: boolean;
   due: boolean; // no Creative Brief yet this week
+  auto: boolean; // the Monday 08:00 cron makes the brief (studio_clients.weekly_auto)
   briefTitle: string | null;
   ideas: number;
   waiting: number;
@@ -590,7 +591,11 @@ function idleLines(id: StationId, info: SalonInfo): string[] {
       return [`Brand Card ครบ ${info.cardFilled}/${info.cardTotal} ช่อง`, info.positioning ? `จุดยืน: ${info.positioning}` : 'ยังไม่มีจุดยืนคอนเทนต์', 'โทนสีแบรนด์พร้อมแล้ว'];
     case 'scout':
       if (info.week.due)
-        return [info.week.isMonday ? 'วันจันทร์! ออกไปหาข่าวประจำสัปดาห์' : 'สัปดาห์นี้ยังไม่ได้หาข่าว', 'ข่าวมู วันสำคัญ กระแสสี', 'กดเริ่มรอบสัปดาห์นี้ได้เลย'];
+        return [
+          info.week.isMonday ? 'วันจันทร์! ออกไปหาข่าวประจำสัปดาห์' : 'สัปดาห์นี้ยังไม่ได้หาข่าว',
+          'ข่าวมู วันสำคัญ กระแสสี',
+          info.week.auto ? 'เช้า 08:00 จะออกไปหาเอง' : 'กดเริ่มรอบสัปดาห์นี้ได้เลย'
+        ];
       return info.research
         ? ['รอบนี้ออกไปหาเทรนด์ให้', 'หาวันสำคัญที่กำลังมาถึง', 'ทุกข้อต้องมีลิงก์']
         : ['ได้ข่าวประจำสัปดาห์แล้ว', 'รอบหน้า: วันจันทร์', 'ตามข่าวมูไว้รอแล้ว'];
@@ -749,7 +754,9 @@ export default function ContentStudioSalon({
 
         {/* weekly workflow — read from the library, always visible */}
         <div className="sl-week" aria-label="Workflow รอบสัปดาห์นี้">
-          <span className="sl-week-h">รอบสัปดาห์นี้ (เริ่ม {info.week.startLabel})</span>
+          <span className="sl-week-h">
+            รอบสัปดาห์นี้ (เริ่ม {info.week.startLabel}) · {info.week.auto ? 'มุมหาเทรนด์ออกไปหาข่าวเองทุกจันทร์ 08:00' : 'ยังไม่ได้เปิดหาข่าวอัตโนมัติ'}
+          </span>
           <ol className="sl-steps">
             {(
               [

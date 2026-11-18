@@ -67,6 +67,23 @@ export async function PATCH(request: Request) {
 
   const body = await request.json().catch(() => null);
   const id = z.string().uuid().safeParse(body?.id);
+
+  // Toggle only: automatic Monday brief (migration 0034).
+  if (typeof body?.weekly_auto === 'boolean' && body?.name === undefined) {
+    if (!id.success) return NextResponse.json({ error: 'ข้อมูลไม่ถูกต้อง' }, { status: 400 });
+    const { data, error } = await supabase
+      .from('studio_clients')
+      .update({ weekly_auto: body.weekly_auto, updated_at: new Date().toISOString() })
+      .eq('id', id.data)
+      .select('*')
+      .single();
+    if (error) {
+      const msg = /weekly_auto/.test(error.message) ? 'ยังไม่ได้รัน migration 0034_studio_weekly_auto.sql ใน Supabase SQL Editor' : error.message;
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
+    return NextResponse.json({ client: data });
+  }
+
   const parsed = cardSchema.safeParse(body);
   if (!id.success || !parsed.success) return NextResponse.json({ error: 'ข้อมูลไม่ถูกต้อง' }, { status: 400 });
 

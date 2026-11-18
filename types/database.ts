@@ -593,6 +593,7 @@ export interface StudioClient {
   notes: string | null;
   created_by: string | null;
   created_at: string;
+  weekly_auto?: boolean; // migration 0034 — automatic Monday brief
   updated_at: string;
 }
 
