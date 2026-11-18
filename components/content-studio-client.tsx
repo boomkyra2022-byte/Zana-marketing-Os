@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StudioClient, StudioPost, StudioRetention } from '@/types/database';
 import {
   STUDIO_FIELDS,
@@ -9,7 +9,7 @@ import {
   STUDIO_FUNNEL,
   type StudioFormat
 } from '@/prompts/content-studio';
-import ContentStudioSalon, { useSalonRun, type SalonInfo } from '@/components/content-studio-salon';
+import ContentStudioSalon, { useSalonRun, type SalonInfo, type SalonWeek } from '@/components/content-studio-salon';
 
 interface Props {
   initialClients: StudioClient[];
@@ -91,6 +91,30 @@ async function generateStream(body: Record<string, unknown>, onStage: (e: { stag
   throw new Error('การเชื่อมต่อขาดระหว่างทาง ลองกดสร้างใหม่');
 }
 
+// Monday 00:00 Asia/Bangkok of the current week (the weekly brief cadence).
+function weekStart(now: number) {
+  const bkk = new Date(now + 7 * 3600e3);
+  const back = (bkk.getUTCDay() + 6) % 7;
+  return Date.UTC(bkk.getUTCFullYear(), bkk.getUTCMonth(), bkk.getUTCDate() - back) - 7 * 3600e3;
+}
+
+function weekInfo(posts: StudioPost[], drafts: { format: string }[], now: number): SalonWeek {
+  const start = weekStart(now);
+  const since = (iso: string | null | undefined) => !!iso && Date.parse(iso) >= start;
+  const brief = posts.find((p) => p.format === 'brief_week' && since(p.created_at));
+  const draftBrief = drafts.some((d) => d.format === 'brief_week');
+  return {
+    startLabel: new Date(start).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', weekday: 'short', day: 'numeric', month: 'short' }),
+    isMonday: new Date(now + 7 * 3600e3).getUTCDay() === 1,
+    due: !brief && !draftBrief,
+    briefTitle: brief?.title ?? (draftBrief ? 'ทำแล้ว ยังไม่เก็บเข้าคลัง' : null),
+    ideas: posts.filter((p) => p.format === 'brief_ideas' && since(p.created_at)).length,
+    waiting: posts.filter((p) => p.production === 'waiting' && p.status !== 'used').length,
+    received: posts.filter((p) => p.production === 'received' && p.status !== 'used').length,
+    posted: posts.filter((p) => p.status === 'used' && since(p.used_at)).length
+  };
+}
+
 function scoreClass(s: number) {
   return s >= 8 ? 'bg-green-50 text-green-700' : s >= 6 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700';
 }
@@ -142,6 +166,7 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
   const [editPost, setEditPost] = useState<{ id: string; body: string } | null>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const salon = useSalonRun();
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const client = clients.find((c) => c.id === sel) ?? null;
@@ -165,8 +190,13 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     libUsed: clientPosts.filter((p) => p.status === 'used').length,
     unsaved: drafts.filter((d) => !d.saved).length,
     research: !!fmtObj?.research,
+    week: weekInfo(clientPosts, drafts, nowMs),
     avgScore: scored.length ? Math.round((scored.reduce((a, d) => a + (d.retention?.score ?? 0), 0) / scored.length) * 10) / 10 : null
   };
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 60000);
+    return () => window.clearInterval(id);
+  }, []);
   const showResults = () => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   function flash(m: string) {
@@ -264,8 +294,10 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     }
   }
 
-  async function generate() {
+  async function generate(fmtId: string = fmt) {
     if (!client) return;
+    const fmt = fmtId;
+    const fmtObj = STUDIO_FORMATS.find((f) => f.id === fmt);
     setBusy('gen');
     setErr('');
     setDrafts([]);
@@ -292,6 +324,14 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
       salon.fail(e.message);
     }
     setBusy(null);
+  }
+
+  // Weekly loop (Monday): Trend Scout news run + Creative Brief in one click.
+  function startWeek() {
+    setFmt('brief_week');
+    setSource(null);
+    setTab('create');
+    void generate('brief_week');
   }
 
   async function saveDraft(i: number, status: Status) {
@@ -558,7 +598,7 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
                       </select>
                     </label>
                   )}
-                  <button type="button" className="btn-primary" disabled={busy === 'gen'} onClick={generate}>
+                  <button type="button" className="btn-primary" disabled={busy === 'gen'} onClick={() => generate()}>
                     {busy === 'gen' ? 'กำลังเขียน…' : '✦ สร้างคอนเทนต์'}
                   </button>
                 </div>
@@ -568,7 +608,7 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
                     : 'ทิป: กด "อนุมัติ" ชิ้นที่ชอบ ระบบจะใช้เป็นตัวอย่างสไตล์ของลูกค้ารายนี้ในครั้งต่อไป'}
                 </p>
 
-                <ContentStudioSalon run={salon.run} info={salonInfo} onShowResults={drafts.length ? showResults : undefined} />
+                <ContentStudioSalon run={salon.run} info={salonInfo} onShowResults={drafts.length ? showResults : undefined} onStartWeek={startWeek} />
 
                 {drafts.length > 0 && (
                   <div ref={resultsRef} className="flex flex-col gap-3 scroll-mt-4">
