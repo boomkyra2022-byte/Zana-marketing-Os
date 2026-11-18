@@ -574,3 +574,45 @@ export interface AdRuleExecution {
   reasoning: string;
   created_at: string;
 }
+
+// Content Studio (migration 0032) — per-client Brand Card + content library.
+export interface StudioClient {
+  id: string;
+  name: string;
+  business: string | null;
+  audience: string | null;
+  pains: string | null;
+  usp: string | null;
+  positioning: string | null;
+  offer: string | null;
+  voice: string | null;
+  pillars: string | null;
+  cta: string | null;
+  banned: string | null;
+  examples: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StudioRetention {
+  score: number;
+  checks: { name: string; pass: boolean; fix?: string }[];
+}
+
+export interface StudioPost {
+  id: string;
+  client_id: string;
+  format: string;
+  funnel: 'tofu' | 'mofu' | 'bofu' | null;
+  title: string;
+  body: string;
+  topic: string | null;
+  retention: StudioRetention | null;
+  status: 'draft' | 'approved' | 'used';
+  used_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}

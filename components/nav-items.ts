@@ -52,6 +52,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { href: '/creative-city', label: 'Creative City' },
       { href: '/creative-generator', label: 'Creative Generator' },
       { href: '/content-library', label: 'Content Library' },
+      // Content Studio (2026-11-18) — JANGZANA per-client Brand Card + content
+      // library (migration 0032). Separate from Content Library (ZANA pipeline).
+      { href: '/content-studio', label: 'Content Studio (ลูกค้า)' },
       { href: '/flow-prompt', label: 'Flow Prompt Director' },
       // New, standalone module — spec doc "ZANA AI Video Prompt Studio —
       // Spec & Build Plan" (Claude Docs, 2026-09-24), P0. Deliberately a
@@ -82,6 +85,9 @@ export const NAV_GROUPS: NavGroup[] = [
     label: '04 · Analytics',
     slug: 'analytics',
     items: [
+      // Ads Intelligence (2026-11-14) — Dashboard / Ad Spotlight / Creative
+      // Fatigue / Video Ads on live Meta data, ZANA's own take on MaxxGPT.
+      { href: '/ads-intelligence', label: 'Ads Intelligence' },
       { href: '/video-analyzer', label: 'Video Analyzer' },
       { href: '/ads', label: 'Ads Automation' }
     ]
