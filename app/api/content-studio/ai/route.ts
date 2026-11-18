@@ -32,7 +32,9 @@ const generateSchema = z.object({
   funnel: z.enum(['tofu', 'mofu', 'bofu']).default('tofu'),
   topic: z.string().max(2000).default(''),
   count: z.number().int().min(1).max(5).default(3),
-  stream: z.boolean().optional()
+  stream: z.boolean().optional(),
+  // "แตกเป็นไอเดีย": the brief / plan the ideas are split from
+  source: z.string().max(30000).optional()
 });
 const autofillSchema = z.object({ mode: z.literal('autofill'), raw: z.string().min(1).max(40000) });
 
@@ -118,7 +120,8 @@ async function runGenerate(supabase: Supabase, userId: string, data: z.infer<typ
     count: data.count,
     examples: (ex ?? []).map((x) => ({ title: x.title, body: x.body })),
     research,
-    recentThemes
+    recentThemes,
+    source: data.source
   });
 
   emit({ type: 'stage', stage: 'write', examples: ex?.length ?? 0, count });

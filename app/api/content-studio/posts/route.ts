@@ -24,15 +24,28 @@ const createSchema = z.object({
   body: z.string().min(1).max(30000),
   topic: z.string().max(1000).nullable().optional(),
   retention: retentionSchema,
-  status: z.enum(['draft', 'approved', 'used']).default('draft')
+  status: z.enum(['draft', 'approved', 'used']).default('draft'),
+  // migration 0033: ideas split from a brief start as "waiting for real work"
+  production: z.enum(['waiting', 'received']).nullable().optional(),
+  parent_id: z.string().uuid().nullable().optional()
 });
 
 const patchSchema = z.object({
   id: z.string().uuid(),
   body: z.string().min(1).max(30000).optional(),
   title: z.string().min(1).max(300).optional(),
-  status: z.enum(['draft', 'approved', 'used']).optional()
+  status: z.enum(['draft', 'approved', 'used']).optional(),
+  production: z.enum(['waiting', 'received']).nullable().optional(),
+  production_note: z.string().max(4000).nullable().optional()
 });
+
+// Column missing = migration 0033 not run yet; say so instead of the raw error.
+function dbError(message: string) {
+  if (/production|parent_id/i.test(message) && /column|schema cache/i.test(message)) {
+    return 'ยังไม่ได้รัน migration 0033_studio_production.sql ใน Supabase SQL Editor (ต้องใช้กับสถานะรอผลงานจริง)';
+  }
+  return message;
+}
 
 async function guard() {
   const supabase = createClient();
@@ -56,7 +69,7 @@ export async function POST(request: Request) {
     .insert({ ...parsed.data, created_by: g.user.id })
     .select('*')
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: dbError(error.message) }, { status: 500 });
   return NextResponse.json({ post: data });
 }
 
@@ -68,9 +81,10 @@ export async function PATCH(request: Request) {
   const { id, ...rest } = parsed.data;
   const update: Record<string, unknown> = { ...rest, updated_at: new Date().toISOString() };
   if (rest.status === 'used') update.used_at = new Date().toISOString();
+  if (rest.production) update.production_at = new Date().toISOString();
 
   const { data, error } = await g.supabase.from('studio_posts').update(update).eq('id', id).select('*').single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: dbError(error.message) }, { status: 500 });
   return NextResponse.json({ post: data });
 }
 

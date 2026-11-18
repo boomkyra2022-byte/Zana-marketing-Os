@@ -35,6 +35,10 @@ const STATUS_CLASS: Record<Status, string> = {
   approved: 'bg-green-50 text-green-700',
   used: 'bg-indigo-50 text-indigo-700'
 };
+// Formats whose result is a plan to split into ideas ("แตกเป็นไอเดีย").
+const PLAN_FORMATS = new Set(['brief_week', 'mu_week', 'collection', 'plan30', 'plan7']);
+const PROD_LABEL = { waiting: 'รอผลงานจริง', received: 'ได้ผลงานแล้ว' } as const;
+const PROD_CLASS = { waiting: 'bg-orange-50 text-orange-700', received: 'bg-sky-50 text-sky-700' } as const;
 const FMT = Object.fromEntries(STUDIO_FORMATS.map((f) => [f.id, f.name]));
 const FUNNEL = Object.fromEntries(STUDIO_FUNNEL.map((f) => [f.id, f.name]));
 const EMPTY_CARD = Object.fromEntries(STUDIO_FIELDS.map((f) => [f.key, ''])) as Record<string, string>;
@@ -125,13 +129,16 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
   const [fmt, setFmt] = useState('sale');
   const [funnel, setFunnel] = useState('tofu');
   const [topic, setTopic] = useState('');
+  // The brief/plan being split into ideas (format brief_ideas).
+  const [source, setSource] = useState<{ id: string | null; title: string; body: string } | null>(null);
+  const [prodEdit, setProdEdit] = useState<{ id: string; note: string } | null>(null);
   const [count, setCount] = useState(3);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
   const [libFmt, setLibFmt] = useState('all');
-  const [libStatus, setLibStatus] = useState<'all' | Status>('all');
+  const [libStatus, setLibStatus] = useState<'all' | Status | 'waiting' | 'received'>('all');
   const [editPost, setEditPost] = useState<{ id: string; body: string } | null>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const salon = useSalonRun();
@@ -265,7 +272,7 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     const want = fmtObj?.single ? 1 : count;
     salon.start('generate', fmtObj?.research ? ['reception', 'brand', 'scout', 'design', 'nail', 'qc'] : ['reception', 'brand', 'design', 'nail', 'qc'], `รับ brief: ${FMT[fmt] ?? fmt} · ${FUNNEL[funnel] ?? funnel}${topic.trim() ? ` · ${topic.trim()}` : ''}`);
     try {
-      const { items, sources } = await generateStream({ mode: 'generate', client_id: client.id, format: fmt, funnel, topic, count }, (e) => {
+      const { items, sources } = await generateStream({ mode: 'generate', client_id: client.id, format: fmt, funnel, topic, count, ...(fmt === 'brief_ideas' && source ? { source: source.body } : {}) }, (e) => {
         if (e.stage === 'brand') salon.step('brand', `เปิด Brand Card ของ ${client.name}`);
         else if (e.stage === 'scout') salon.step('scout', 'ค้นเว็บหาเทรนด์ + วันสำคัญ…');
         else if (e.stage === 'scouted')
@@ -292,15 +299,18 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     const d = drafts[i];
     salon.start('save', ['showcase'], `เก็บ "${d.title}" เข้าคลัง…`);
     try {
+      const idea = d.format === 'brief_ideas';
       const { post } = await api<{ post: StudioPost }>('/api/content-studio/posts', 'POST', {
         client_id: client.id,
         format: d.format,
         funnel: d.funnel,
         title: d.title,
         body: d.body,
-        topic: d.topic || null,
+        topic: d.topic || (idea && source ? source.title.slice(0, 1000) : null),
         retention: d.retention,
-        status
+        status,
+        // ideas wait for the shop's real work (migration 0033)
+        ...(idea ? { production: 'waiting', parent_id: source?.id ?? null } : {})
       });
       setPosts((ps) => [post, ...ps]);
       setDrafts((ds) => ds.map((x, j) => (j === i ? { ...x, saved: true } : x)));
@@ -312,11 +322,23 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     }
   }
 
-  async function patchPost(id: string, data: Partial<Pick<StudioPost, 'body' | 'status'>>, note: string) {
+  // Start "แตกเป็นไอเดีย" from a brief / plan (a library post or an unsaved draft).
+  function splitIdeas(from: { id: string | null; title: string; body: string }) {
+    setSource(from);
+    setFmt('brief_ideas');
+    setCount(5);
+    setDrafts([]);
+    setTab('create');
+    flash('เลือกรูปแบบ "แตกบรีฟเป็นไอเดีย" ให้แล้ว กด ✦ สร้างคอนเทนต์ได้เลย');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function patchPost(id: string, data: Partial<Pick<StudioPost, 'body' | 'status' | 'production' | 'production_note'>>, note: string) {
     try {
       const { post } = await api<{ post: StudioPost }>('/api/content-studio/posts', 'PATCH', { id, ...data });
       setPosts((ps) => ps.map((p) => (p.id === id ? post : p)));
       setEditPost(null);
+      setProdEdit(null);
       flash(note);
     } catch (e: any) {
       setErr(e.message);
@@ -338,7 +360,13 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
     }
   }
 
-  const libList = clientPosts.filter((p) => (libFmt === 'all' || p.format === libFmt) && (libStatus === 'all' || p.status === libStatus));
+  const libList = clientPosts.filter(
+    (p) =>
+      (libFmt === 'all' || p.format === libFmt) &&
+      (libStatus === 'all' ||
+        (libStatus === 'waiting' || libStatus === 'received' ? p.production === libStatus && p.status !== 'used' : p.status === libStatus))
+  );
+  const prodCount = (k: 'waiting' | 'received') => clientPosts.filter((p) => p.production === k && p.status !== 'used').length;
   const libFormats = STUDIO_FORMATS.filter((f) => clientPosts.some((p) => p.format === f.id));
   const tabBtn = (id: Tab, label: string) => (
     <button
@@ -457,6 +485,24 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
 
             {tab === 'create' && (
               <div className="card p-5 flex flex-col gap-4">
+                {fmt === 'brief_ideas' && (
+                  <div className="rounded-xl border border-dashed border-[var(--accent-terracotta)] bg-[var(--accent-terracotta-tint)] p-3 text-sm flex gap-3 flex-wrap items-center justify-between">
+                    <span className="min-w-0">
+                      {source ? (
+                        <>
+                          แตกเป็นไอเดียจาก: <b>{source.title}</b> · เก็บเข้าคลังแล้วจะขึ้นสถานะ &quot;รอผลงานจริง&quot;
+                        </>
+                      ) : (
+                        'ยังไม่ได้เลือกบรีฟ — กด "แตกเป็นไอเดีย" ที่บรีฟในคลังหรือในผลลัพธ์ หรือวางบรีฟในช่องหัวข้อ'
+                      )}
+                    </span>
+                    {source && (
+                      <button type="button" className="btn-secondary" onClick={() => setSource(null)}>
+                        เลิกใช้บรีฟนี้
+                      </button>
+                    )}
+                  </div>
+                )}
                 <h3 className="font-bold">1. เลือกรูปแบบ</h3>
                 {(Object.keys(STUDIO_FORMAT_GROUPS) as StudioFormat['group'][]).map((g) => (
                   <div key={g}>
@@ -557,8 +603,13 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
                             เก็บเข้าคลัง
                           </button>
                           <button type="button" className="btn-primary" disabled={d.saved} onClick={() => saveDraft(i, 'approved')}>
-                            อนุมัติ + เก็บ
+                            {d.format === 'brief_ideas' ? 'อนุมัติ + รอผลงานจริง' : 'อนุมัติ + เก็บ'}
                           </button>
+                          {PLAN_FORMATS.has(d.format) && (
+                            <button type="button" className="btn-secondary" onClick={() => splitIdeas({ id: null, title: d.title, body: d.body })}>
+                              แตกเป็นไอเดีย →
+                            </button>
+                          )}
                         </div>
                       </article>
                     ))}
@@ -582,6 +633,11 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
                       {s === 'all' ? `ทุกสถานะ (${clientPosts.length})` : `${STATUS_LABEL[s]} (${clientPosts.filter((p) => p.status === s).length})`}
                     </button>
                   ))}
+                  {(['waiting', 'received'] as const).map((k) => (
+                    <button key={k} type="button" onClick={() => setLibStatus(k)} className={`rounded-full border px-3 py-1 text-sm ${libStatus === k ? 'bg-[var(--text-main)] text-white border-[var(--text-main)]' : 'border-[var(--border)] text-[var(--text-muted)]'}`}>
+                      {PROD_LABEL[k]} ({prodCount(k)})
+                    </button>
+                  ))}
                 </div>
                 {!clientPosts.length && <p className="text-[var(--text-muted)] py-6 text-center">คลังของลูกค้ารายนี้ยังว่าง — สร้างคอนเทนต์แล้วกด &quot;เก็บเข้าคลัง&quot;</p>}
                 {clientPosts.length > 0 && !libList.length && <p className="text-sm text-[var(--text-muted)]">ไม่มีชิ้นที่ตรงกับตัวกรองนี้</p>}
@@ -589,6 +645,7 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
                   <article key={p.id} className="rounded-xl border border-[var(--border)] bg-white p-4 flex flex-col gap-2">
                     <div className="flex gap-2 flex-wrap items-center text-xs text-[var(--text-muted)]">
                       <span className={`rounded-full px-2 py-0.5 font-semibold ${STATUS_CLASS[p.status]}`}>{STATUS_LABEL[p.status]}</span>
+                      {p.production && p.status !== 'used' && <span className={`rounded-full px-2 py-0.5 font-semibold ${PROD_CLASS[p.production]}`}>{PROD_LABEL[p.production]}</span>}
                       <span className="rounded-full bg-gray-100 px-2 py-0.5">{FMT[p.format] ?? p.format}</span>
                       {p.funnel && <span className="rounded-full bg-gray-100 px-2 py-0.5">{FUNNEL[p.funnel]}</span>}
                       <span>{new Date(p.created_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}</span>
@@ -596,6 +653,30 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
                     </div>
                     <h4 className="font-semibold">{p.title}</h4>
                     <Retention r={p.retention} />
+                    {p.production_note && prodEdit?.id !== p.id && (
+                      <div className="rounded-lg bg-sky-50 text-sky-900 px-3 py-2 text-sm whitespace-pre-wrap break-words">
+                        <b>ผลงานจริงจากร้าน:</b> {p.production_note}
+                      </div>
+                    )}
+                    {prodEdit?.id === p.id && (
+                      <label className="flex flex-col gap-1 text-sm font-semibold">
+                        ข้อมูลผลงานจริงจากร้าน
+                        <textarea
+                          rows={4}
+                          value={prodEdit.note}
+                          onChange={(e) => setProdEdit({ id: p.id, note: e.target.value })}
+                          placeholder="ลิงก์รูป/คลิป · ชื่อเฉดที่ใช้ · บริการ + ราคาที่คิดจริง · ลูกค้ายินยอมให้ลงรูปแล้วหรือยัง · วันที่ถ่าย"
+                        />
+                        <span className="flex gap-2 flex-wrap font-normal">
+                          <button type="button" className="btn-primary" onClick={() => patchPost(p.id, { production: 'received', production_note: prodEdit.note.trim() || null }, 'อัปเดตเป็น "ได้ผลงานแล้ว"')}>
+                            บันทึกว่าได้ผลงานแล้ว
+                          </button>
+                          <button type="button" className="btn-secondary" onClick={() => setProdEdit(null)}>
+                            ยกเลิก
+                          </button>
+                        </span>
+                      </label>
+                    )}
                     {editPost?.id === p.id ? (
                       <textarea rows={10} aria-label="แก้ข้อความ" value={editPost.body} onChange={(e) => setEditPost({ id: p.id, body: e.target.value })} />
                     ) : (
@@ -624,9 +705,19 @@ export default function ContentStudioClient({ initialClients, initialPosts }: Pr
                               อนุมัติ
                             </button>
                           )}
+                          {p.production && p.status !== 'used' && prodEdit?.id !== p.id && (
+                            <button type="button" className="btn-secondary" onClick={() => setProdEdit({ id: p.id, note: p.production_note ?? '' })}>
+                              {p.production === 'waiting' ? 'ได้ผลงานแล้ว' : 'แก้ข้อมูลผลงาน'}
+                            </button>
+                          )}
                           {p.status !== 'used' && (
                             <button type="button" className="btn-secondary" onClick={() => patchPost(p.id, { status: 'used' }, 'ทำเครื่องหมายว่าโพสต์แล้ว')}>
                               โพสต์แล้ว
+                            </button>
+                          )}
+                          {PLAN_FORMATS.has(p.format) && (
+                            <button type="button" className="btn-secondary" onClick={() => splitIdeas({ id: p.id, title: p.title, body: p.body })}>
+                              แตกเป็นไอเดีย →
                             </button>
                           )}
                           <button type="button" className="btn-secondary text-red-700" onClick={() => deletePost(p.id)}>

@@ -93,6 +93,15 @@ export const STUDIO_FORMATS: StudioFormat[] = [
       'ปิดท้ายด้วย "สิ่งที่ต้องขอจากร้านเดือนนี้" (รูปจริง ข้อมูลยืนยัน ราคาเมนูล่าสุด) และ "ตัวชี้วัดที่ต้องดูทุกสัปดาห์" (ลายหรือบริการที่ลูกค้าทักถามมากสุด เพื่อใช้คิดบรีฟรอบถัดไป)',
       'ห้ามใส่ราคา โปร รีวิว หรือคิวว่างที่ไม่มีใน Brand Card; เทรนด์ให้ติด [ต้องเช็ก]'
     ].join(' ') },
+  // Step after a brief (user request 2026-11-18): split it into ideas that wait
+  // for the shop's real work; status is tracked in the library (migration 0033).
+  { id: 'brief_ideas', group: 'plan', name: 'แตกบรีฟเป็นไอเดีย', desc: 'เปลี่ยนบรีฟเป็นใบงานทีละชิ้น ไว้รอผลงานจริงจากร้าน',
+    spec: [
+      'แตก <source_brief> เป็นใบงานไอเดียทีละชิ้น (ชิ้นละ 1 item) เรียงตามความสำคัญ: ชิ้นที่ต้องลงภายใน 3 วันก่อน แล้วสายมู คอลเลกชัน และชิ้นสะสมคลัง; ถ้าไม่มี <source_brief> ให้แตกจากหัวข้อวันนี้',
+      'title = ชื่อไอเดียสั้น + วันโพสต์ เช่น "เล็บแดงเสริมดวง · ศ. 28 พ.ย."',
+      'body ของแต่ละชิ้น: Stage, Objective, Hook, ข้อความบนภาพ, สี/ดีไซน์ที่ช่างต้องหยิบจากสต็อกจริง (ให้ร้านยืนยันชื่อเฉด), ช็อต 9:16 และภาพนิ่งที่ต้องถ่าย, คำถามให้ช่างหรือเจ้าของตอบหน้ากล้อง, Caption direction, CTA, สิ่งที่หน้าร้านต้องส่งกลับ (ภาพ/คลิป/ชื่อเฉด/ราคาที่คิดจริง/ใบยินยอมลูกค้า), Owner, Deadline ส่งงาน, วันโพสต์',
+      'ใช้ข้อมูลจาก <source_brief> และ Brand Card เท่านั้น ห้ามเพิ่มราคา โปร รีวิว หรือคิวที่ไม่ยืนยัน'
+    ].join(' ') },
   // Three recurring pillars (explicit user request 2026-11-18): weekly สายมู,
   // collections for upcoming occasions, and the occasional pop-culture colour.
   { id: 'mu_week', group: 'plan', name: 'สายมูประจำสัปดาห์', desc: 'ข่าวดวง/สีมงคลสัปดาห์นี้ → สีเล็บเสริมดวงแยกราศี (Carousel)', single: true, research: true,
@@ -170,6 +179,7 @@ export function buildContentStudioPrompt(opts: {
   examples: StyleExample[];
   research?: TrendResearch | null;
   recentThemes?: string[];
+  source?: string;
 }): { system: string; user: string; count: number } {
   const fmt = STUDIO_FORMATS.find((f) => f.id === opts.formatId) ?? STUDIO_FORMATS[0];
   const funnel = STUDIO_FUNNEL.find((f) => f.id === opts.funnel) ?? STUDIO_FUNNEL[0];
@@ -201,6 +211,7 @@ export function buildContentStudioPrompt(opts: {
     fmt.research && opts.recentThemes?.length
       ? '<recent_themes> (บรีฟ/แผนที่ทำไปแล้วใน 7 วันล่าสุด)\n' + opts.recentThemes.map((t) => `- ${t}`).join('\n') + '\n</recent_themes>'
       : '',
+    opts.source?.trim() ? '<source_brief> (บรีฟหรือแผนที่ต้องแตกเป็นไอเดีย)\n' + opts.source.trim().slice(0, 30000) + '\n</source_brief>' : '',
     '<instructions>',
     'รูปแบบ: ' + fmt.spec,
     'ขั้น Funnel: ' + funnel.spec,
