@@ -80,5 +80,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/public).*)']
+  // PWA files must load before login (install prompt, offline page).
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/public|manifest.webmanifest|sw.js|offline.html|icons/).*)']
 };
