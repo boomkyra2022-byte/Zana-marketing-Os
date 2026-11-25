@@ -7,15 +7,13 @@ import { SpotlightTab, spotlightAiData, type SpotlightOpts } from './spotlight-t
 import { FatigueTab, fatigueAiData, type FatigueOpts } from './fatigue-tab';
 import { VideoTab, videoAiData } from './video-tab';
 import { InsightPanel, type AiInsight } from './ui';
+import AdsBoard, { type BoardAccount } from '@/components/ads-board';
 
-export interface AccountOption {
-  metaAccountId: string;
-  name: string;
-}
-
-type Tab = 'dashboard' | 'spotlight' | 'fatigue' | 'video';
+type ReportTab = 'dashboard' | 'spotlight' | 'fatigue' | 'video';
+type Tab = 'board' | ReportTab;
 
 const TABS: { key: Tab; label: string; hint: string }[] = [
+  { key: 'board', label: 'ตารางแอด', hint: 'ตารางแบบ Ads Manager: แคมเปญ / ชุดโฆษณา / โฆษณา พร้อมงบ ผลลัพธ์ การซื้อ และ ROAS' },
   { key: 'dashboard', label: 'Dashboard', hint: 'ภาพรวมทั้งบัญชี: แนวโน้ม, funnel, วัตถุประสงค์, อายุ × เพศ' },
   { key: 'spotlight', label: 'Ad Spotlight', hint: 'โฆษณาที่ควรเพิ่มงบ ควรพิจารณาปิด และครีเอทีฟที่ให้ผลดี' },
   { key: 'fatigue', label: 'Creative Fatigue', hint: 'โฆษณาไหนเริ่มล้า และควรเตรียมครีเอทีฟใหม่เมื่อไร' },
@@ -50,7 +48,7 @@ const LS_KEY = 'zana.adsIntelligence.v1';
 type InsightState = { loading: boolean; error: string | null; insight: AiInsight | null; model?: string };
 const emptyInsight: InsightState = { loading: false, error: null, insight: null };
 
-export default function AdsIntelligenceClient({ accounts }: { accounts: AccountOption[] }) {
+export default function AdsIntelligenceClient({ accounts }: { accounts: BoardAccount[] }) {
   const [tab, setTab] = useState<Tab>('dashboard');
   const [accountId, setAccountId] = useState(accounts[0]?.metaAccountId ?? '');
   const [preset, setPreset] = useState('7d');
@@ -60,7 +58,7 @@ export default function AdsIntelligenceClient({ accounts }: { accounts: AccountO
   const [report, setReport] = useState<AdsReport | null>(null);
   const [spotOpts, setSpotOpts] = useState<SpotlightOpts>({ minSpend: 350, result: 'inbox', level: 'ad' });
   const [fatOpts, setFatOpts] = useState<FatigueOpts>({ minSpend: 1000, minDays: 7, result: 'inbox' });
-  const [insights, setInsights] = useState<Record<Tab, InsightState>>({ dashboard: emptyInsight, spotlight: emptyInsight, fatigue: emptyInsight, video: emptyInsight });
+  const [insights, setInsights] = useState<Record<ReportTab, InsightState>>({ dashboard: emptyInsight, spotlight: emptyInsight, fatigue: emptyInsight, video: emptyInsight });
 
   // Per-viewer convenience only: remember last account + tab.
   useEffect(() => {
@@ -107,7 +105,7 @@ export default function AdsIntelligenceClient({ accounts }: { accounts: AccountO
   }
 
   const aiPayload = useMemo(() => {
-    if (!report) return null;
+    if (!report || tab === 'board') return null;
     if (tab === 'dashboard') return dashboardAiData(report);
     if (tab === 'spotlight') return spotlightAiData(report, spotOpts);
     if (tab === 'fatigue') return fatigueAiData(report, fatOpts);
@@ -115,7 +113,7 @@ export default function AdsIntelligenceClient({ accounts }: { accounts: AccountO
   }, [report, tab, spotOpts, fatOpts]);
 
   async function runInsight() {
-    if (!report || !aiPayload) return;
+    if (!report || !aiPayload || tab === 'board') return;
     const t = tab;
     setInsights((s) => ({ ...s, [t]: { ...s[t], loading: true, error: null } }));
     try {
@@ -141,8 +139,40 @@ export default function AdsIntelligenceClient({ accounts }: { accounts: AccountO
 
   const spendRows = report?.rows.filter((r) => r.spend > 0).length ?? 0;
 
+  const tabBar = (
+    <>
+      <div className="flex gap-1 overflow-x-auto border-b border-[var(--border)]" role="tablist">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-4 py-2 text-sm whitespace-nowrap border-b-2 -mb-px ${
+              tab === t.key ? 'border-[var(--accent-terracotta)] font-semibold text-[var(--text-main)]' : 'border-transparent text-[var(--text-muted)]'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-sm text-[var(--text-muted)] -mt-2">{TABS.find((t) => t.key === tab)?.hint}</p>
+    </>
+  );
+
+  if (tab === 'board') {
+    return (
+      <div className="space-y-4">
+        {tabBar}
+        <AdsBoard accounts={accounts} theme="light" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
+      {tabBar}
       <div className="card p-4 sm:p-5 space-y-3">
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex-[2_1_260px] min-w-0">
@@ -158,7 +188,8 @@ export default function AdsIntelligenceClient({ accounts }: { accounts: AccountO
               >
                 {accounts.map((a) => (
                   <option key={a.metaAccountId} value={a.metaAccountId}>
-                    {a.name} · {a.metaAccountId.replace(/^act_/, '')}
+                    {a.name}
+                    {a.label ? ` (${a.label})` : ''} · {a.metaAccountId.replace(/^act_/, '')}
                   </option>
                 ))}
                 <option value="__custom">ใส่ ID เอง…</option>
@@ -243,24 +274,6 @@ export default function AdsIntelligenceClient({ accounts }: { accounts: AccountO
           </p>
         ) : null}
       </div>
-
-      <div className="flex gap-1 overflow-x-auto border-b border-[var(--border)]" role="tablist">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
-            className={`px-4 py-2 text-sm whitespace-nowrap border-b-2 -mb-px ${
-              tab === t.key ? 'border-[var(--accent-terracotta)] font-semibold text-[var(--text-main)]' : 'border-transparent text-[var(--text-muted)]'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <p className="text-sm text-[var(--text-muted)] -mt-2">{TABS.find((t) => t.key === tab)?.hint}</p>
 
       {!report ? (
         <div className="card p-10 text-center text-[var(--text-muted)]">{loading ? 'กำลังดึงข้อมูลจาก Meta…' : 'เลือกบัญชีและช่วงวันที่ แล้วกด "วิเคราะห์ข้อมูล"'}</div>
