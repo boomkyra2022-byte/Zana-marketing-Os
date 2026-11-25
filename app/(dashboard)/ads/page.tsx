@@ -1,20 +1,15 @@
 import { createClient } from '@/lib/supabase/server';
 import { addAccount, setAccountSync } from './accounts/actions';
+import AdsBoard from '@/components/ads-board';
+import { toBoardAccounts } from '@/lib/ads/board-accounts';
+import { accountDisplayName } from '@/lib/meta/ads-board-shared';
 import { CONNECTION_LABEL, connectionState, errorAdvice, metaStatusInfo, type ConnectionState, type Tone } from '@/lib/ads/status';
 
 interface SnapshotRow {
   ad_set_id: string;
   ad_account_id: string;
-  campaign_id: string;
   spend: number | null;
-  roas: number | null;
-  cpa: number | null;
-  frequency: number | null;
-  ctr: number | null;
-  captured_at: string;
-  ad_sets: { name: string; status: string | null } | null;
-  ad_accounts: { name: string } | null;
-  ad_campaigns: { name: string } | null;
+  purchase_value: number | null;
 }
 
 interface AccountRow {
@@ -48,9 +43,6 @@ function fmtDateTime(iso: string | null) {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'short', timeStyle: 'short' });
 }
-function fmtTime(iso: string) {
-  return new Date(iso).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok' });
-}
 
 function roasColor(roas: number | null) {
   if (roas === null || roas === undefined) return 'ads-muted';
@@ -73,9 +65,8 @@ function Badge({ label, tone }: { label: string; tone: Tone }) {
 // Accounts that need a person to act come first.
 const ATTENTION: ConnectionState[] = ['needs_permission', 'token_invalid', 'error'];
 
-export default async function AdsOverviewPage({ searchParams }: { searchParams: { only?: string; error?: string } }) {
+export default async function AdsOverviewPage({ searchParams }: { searchParams: { error?: string } }) {
   const supabase = createClient();
-  const onlyActive = searchParams.only === 'active';
 
   const {
     data: { user }
@@ -94,9 +85,7 @@ export default async function AdsOverviewPage({ searchParams }: { searchParams: 
 
   const { data: rawSnapshots, error } = await supabase
     .from('ad_set_insight_snapshots')
-    .select(
-      'ad_set_id, ad_account_id, campaign_id, spend, roas, cpa, frequency, ctr, captured_at, ad_sets(name, status), ad_accounts(name), ad_campaigns(name)'
-    )
+    .select('ad_set_id, ad_account_id, spend, purchase_value')
     .gte('captured_at', since)
     .order('captured_at', { ascending: false });
 
@@ -105,13 +94,13 @@ export default async function AdsOverviewPage({ searchParams }: { searchParams: 
   for (const row of (rawSnapshots as unknown as SnapshotRow[]) ?? []) {
     if (!latestByAdSet.has(row.ad_set_id)) latestByAdSet.set(row.ad_set_id, row);
   }
-  const allRows = [...latestByAdSet.values()].sort((a, b) => (a.roas ?? -1) - (b.roas ?? -1));
-  const activeRowCount = allRows.filter((r) => r.ad_sets?.status === 'ACTIVE').length;
-  const rows = onlyActive ? allRows.filter((r) => r.ad_sets?.status === 'ACTIVE') : allRows;
+  const allRows = [...latestByAdSet.values()];
 
   const totalSpend = allRows.reduce((sum, r) => sum + (r.spend ?? 0), 0);
-  const roasValues = allRows.map((r) => r.roas).filter((v): v is number => v !== null);
-  const avgRoas = roasValues.length > 0 ? roasValues.reduce((a, b) => a + b, 0) / roasValues.length : null;
+  // Total purchase value / total spend, the way Ads Manager totals ROAS (not a
+  // plain mean of each ad set's ROAS).
+  const totalValue = allRows.reduce((sum, r) => sum + (r.purchase_value ?? 0), 0);
+  const totalRoas = totalSpend > 0 && totalValue > 0 ? totalValue / totalSpend : null;
 
   const spendByAccount = new Map<string, number>();
   for (const r of allRows) spendByAccount.set(r.ad_account_id, (spendByAccount.get(r.ad_account_id) ?? 0) + (r.spend ?? 0));
@@ -140,10 +129,11 @@ export default async function AdsOverviewPage({ searchParams }: { searchParams: 
   }
 
   const now = Date.now();
+  const boardAccounts = toBoardAccounts((accountData as AccountRow[] | null) ?? []);
   const accounts = ((accountData as AccountRow[] | null) ?? []).map((a) => ({ ...a, conn: connectionState(a, now) }));
   const enabled = accounts
     .filter((a) => a.status === 'active')
-    .sort((a, b) => Number(ATTENTION.includes(b.conn)) - Number(ATTENTION.includes(a.conn)) || a.name.localeCompare(b.name));
+    .sort((a, b) => Number(ATTENTION.includes(b.conn)) - Number(ATTENTION.includes(a.conn)) || accountDisplayName(a).localeCompare(accountDisplayName(b), 'th'));
   const notEnabled = accounts.filter((a) => a.status !== 'active');
   const connectedCount = enabled.filter((a) => a.conn === 'connected' || a.conn === 'stale').length;
   const attentionCount = enabled.filter((a) => ATTENTION.includes(a.conn)).length;
@@ -169,8 +159,8 @@ export default async function AdsOverviewPage({ searchParams }: { searchParams: 
           <div className="text-2xl font-bold text-white mt-1">{fmtBaht(totalSpend)}</div>
         </div>
         <div className="ads-card p-4">
-          <div className="ads-muted text-sm">ROAS เฉลี่ย</div>
-          <div className={`text-2xl font-bold mt-1 ${roasColor(avgRoas)}`}>{avgRoas !== null ? fmtNum(avgRoas) : '—'}</div>
+          <div className="ads-muted text-sm">ROAS รวมวันนี้</div>
+          <div className={`text-2xl font-bold mt-1 ${roasColor(totalRoas)}`}>{totalRoas !== null ? fmtNum(totalRoas) : '—'}</div>
         </div>
         <div className="ads-card p-4">
           <div className="ads-muted text-sm">บัญชีที่เชื่อมต่อได้</div>
@@ -191,6 +181,13 @@ export default async function AdsOverviewPage({ searchParams }: { searchParams: 
             </div>
           )}
         </div>
+      </div>
+
+      {error && <div className="ads-card p-4 mb-4 text-red-400 text-sm">โหลดยอดวันนี้ไม่สำเร็จ: {error.message}</div>}
+
+      <h2 className="text-lg font-semibold text-white mb-3">ตารางแอด</h2>
+      <div className="mb-8">
+        <AdsBoard accounts={boardAccounts} theme="dark" />
       </div>
 
       <h2 className="text-lg font-semibold text-white mb-1">บัญชีโฆษณา</h2>
@@ -224,8 +221,8 @@ export default async function AdsOverviewPage({ searchParams }: { searchParams: 
                 return (
                   <tr key={a.id}>
                     <td className="px-4 py-3">
-                      <div className="text-white font-medium">{a.name}</div>
-                      {a.meta_name && a.meta_name !== a.name && <div className="ads-muted text-xs">ใน Meta: {a.meta_name}</div>}
+                      <div className="text-white font-medium">{accountDisplayName(a)}</div>
+                      {accountDisplayName(a) !== a.name && <div className="ads-muted text-xs">ชื่อเรียกในระบบ: {a.name}</div>}
                       <div className="ads-muted text-xs">
                         {a.meta_account_id}
                         {a.business_name ? ` · ${a.business_name}` : ''}
@@ -293,7 +290,7 @@ export default async function AdsOverviewPage({ searchParams }: { searchParams: 
                   return (
                     <tr key={a.id}>
                       <td className="px-4 py-3">
-                        <div className="text-white">{a.name}</div>
+                        <div className="text-white">{accountDisplayName(a)}</div>
                         <div className="ads-muted text-xs">{a.meta_account_id}</div>
                       </td>
                       <td className="px-4 py-3 ads-muted">{a.business_name ?? '—'}</td>
@@ -339,65 +336,6 @@ export default async function AdsOverviewPage({ searchParams }: { searchParams: 
             </p>
           </form>
         </details>
-      )}
-
-      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
-        <h2 className="text-lg font-semibold text-white">Ad set ({rows.length})</h2>
-        <div className="flex gap-2 text-sm">
-          <a href="/ads" className={onlyActive ? 'ads-btn-secondary text-xs py-1 px-3' : 'ads-btn-primary text-xs py-1 px-3'}>
-            ทั้งหมด ({allRows.length})
-          </a>
-          <a href="/ads?only=active" className={onlyActive ? 'ads-btn-primary text-xs py-1 px-3' : 'ads-btn-secondary text-xs py-1 px-3'}>
-            เฉพาะ Active ({activeRowCount})
-          </a>
-        </div>
-      </div>
-
-      {error && <div className="ads-card p-4 mb-4 text-red-400 text-sm">โหลดข้อมูลไม่สำเร็จ: {error.message}</div>}
-
-      {!error && rows.length === 0 && (
-        <div className="ads-card p-8 text-center ads-muted">
-          {onlyActive
-            ? 'ไม่มี ad set ที่ Active และมีข้อมูลในช่วง 45 นาทีล่าสุด'
-            : 'ยังไม่มี snapshot ในช่วง 45 นาทีล่าสุด — รอ cron รอบถัดไป หรือเช็คว่า ads-sync ทำงานอยู่'}
-        </div>
-      )}
-
-      {rows.length > 0 && (
-        <div className="ads-card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th className="px-4 py-3">บัญชี</th>
-                <th className="px-4 py-3">แคมเปญ</th>
-                <th className="px-4 py-3">Ad Set</th>
-                <th className="px-4 py-3">สถานะ</th>
-                <th className="px-4 py-3 text-right">Spend</th>
-                <th className="px-4 py-3 text-right">ROAS</th>
-                <th className="px-4 py-3 text-right">CPA</th>
-                <th className="px-4 py-3 text-right">Frequency</th>
-                <th className="px-4 py-3 text-right">อัปเดตล่าสุด</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.ad_set_id}>
-                  <td className="px-4 py-3 text-white">{r.ad_accounts?.name ?? '—'}</td>
-                  <td className="px-4 py-3 ads-muted">{r.ad_campaigns?.name ?? '—'}</td>
-                  <td className="px-4 py-3 text-white">{r.ad_sets?.name ?? '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className={r.ad_sets?.status === 'ACTIVE' ? 'text-emerald-400' : 'ads-muted'}>{r.ad_sets?.status ?? '—'}</span>
-                  </td>
-                  <td className="px-4 py-3 text-right text-white">{fmtBaht(r.spend)}</td>
-                  <td className={`px-4 py-3 text-right font-semibold ${roasColor(r.roas)}`}>{fmtNum(r.roas)}</td>
-                  <td className="px-4 py-3 text-right ads-muted">{fmtBaht(r.cpa)}</td>
-                  <td className="px-4 py-3 text-right ads-muted">{fmtNum(r.frequency)}</td>
-                  <td className="px-4 py-3 text-right ads-muted text-xs">{fmtTime(r.captured_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       )}
     </div>
   );

@@ -19,7 +19,7 @@ export class MetaReportError extends Error {
   }
 }
 
-type ActionList = { action_type: string; value: string }[] | undefined;
+export type ActionList = { action_type: string; value: string }[] | undefined;
 
 interface RawInsight {
   date_start: string;
@@ -109,12 +109,12 @@ export interface AdsReport {
   fetchedAt: string;
 }
 
-function num(v: string | undefined | null): number {
+export function num(v: string | undefined | null): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
-function pickAction(list: ActionList, ...types: string[]): number {
+export function pickAction(list: ActionList, ...types: string[]): number {
   if (!list) return 0;
   // First matching alias wins (preference order) so the same event reported
   // under two names (omni_purchase + purchase) is never double-counted.
@@ -127,7 +127,7 @@ function pickAction(list: ActionList, ...types: string[]): number {
 
 const first = (list: ActionList) => (list && list.length > 0 ? num(list[0].value) : 0);
 
-const PURCHASE = ['omni_purchase', 'purchase', 'offsite_conversion.fb_pixel_purchase'];
+export const PURCHASE = ['omni_purchase', 'purchase', 'offsite_conversion.fb_pixel_purchase'];
 const INBOX = ['onsite_conversion.messaging_conversation_started_7d'];
 const NEW_INBOX = ['onsite_conversion.messaging_first_reply'];
 const LEAD = ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead'];
@@ -195,13 +195,13 @@ async function metaGetUrl<T>(url: string, conn: MetaConn): Promise<T> {
   return json as T;
 }
 
-function metaGet<T>(path: string, params: Record<string, string>, conn: MetaConn): Promise<T> {
+export function metaGet<T>(path: string, params: Record<string, string>, conn: MetaConn): Promise<T> {
   const url = new URL(`${BASE}${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   return metaGetUrl<T>(url.toString(), conn);
 }
 
-async function getAllPages<T>(path: string, params: Record<string, string>, conn: MetaConn, maxPages = 20): Promise<T[]> {
+export async function getAllPages<T>(path: string, params: Record<string, string>, conn: MetaConn, maxPages = 20): Promise<T[]> {
   const out: T[] = [];
   let page = await metaGet<{ data: T[]; paging?: { next?: string } }>(path, params, conn);
   out.push(...(page.data ?? []));
@@ -265,7 +265,7 @@ export async function fetchAdsReport(opts: { accountId: string; since: string; u
     metaGet<{ name?: string; currency?: string; timezone_name?: string }>(`/${accountId}`, { fields: 'name,currency,timezone_name' }, conn),
     getAllPages<RawInsight>(
       `/${accountId}/insights`,
-      { level: 'ad', time_increment: '1', fields: AD_FIELDS, time_range: timeRange, limit: '500' },
+      { level: 'ad', time_increment: '1', fields: AD_FIELDS, time_range: timeRange, use_unified_attribution_setting: 'true', limit: '500' },
       conn
     ),
     getAllPages<any>(
@@ -275,6 +275,7 @@ export async function fetchAdsReport(opts: { accountId: string; since: string; u
         breakdowns: 'age,gender',
         fields: 'spend,impressions,clicks,actions,action_values,video_play_actions',
         time_range: timeRange,
+        use_unified_attribution_setting: 'true',
         limit: '100'
       },
       conn,
