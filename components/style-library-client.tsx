@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
   DEMO_PURPOSES, MAX_DEMO_BYTES, STYLE_DEMO_BUCKET,
@@ -157,6 +157,53 @@ function UploadForm({ style, onUploaded }: { style: VideoStyle; onUploaded: () =
   );
 }
 
+// Demo clips are vertical (9:16). Each one only plays while it is on screen,
+// so opening the page doesn't download and run all nine clips at once.
+function LoopingDemo({ src, poster, title }: { src: string; poster: string | null; title: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = ref.current;
+    if (!video || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) void video.play().catch(() => undefined);
+      else video.pause();
+    }, { threshold: 0.4 });
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <video ref={ref} className="mx-auto block aspect-[9/16] w-full max-w-[240px] rounded-lg bg-black object-contain"
+      src={src} poster={poster ?? undefined} preload="none" muted loop playsInline controls aria-label={title} />
+  );
+}
+
+type DemoEdit = { title: string; brand: string; purpose: StyleDemo['purpose']; notes: string | null };
+
+function EditDemoForm({ demo, busy, onSave }: { demo: StyleDemo; busy: boolean; onSave: (fields: DemoEdit) => Promise<void> }) {
+  const [form, setForm] = useState<DemoEdit>({ title: demo.title, brand: demo.brand, purpose: demo.purpose, notes: demo.notes });
+  const changed = form.title !== demo.title || form.brand !== demo.brand || form.purpose !== demo.purpose || (form.notes ?? '') !== (demo.notes ?? '');
+
+  return (
+    <details>
+      <summary className="btn-secondary w-fit cursor-pointer">แก้ไขรายละเอียดคลิป</summary>
+      <form className="mt-3 grid gap-3" onSubmit={(event) => {
+        event.preventDefault();
+        void onSave({ ...form, title: form.title.trim(), brand: form.brand.trim(), notes: form.notes?.trim() || null });
+      }}>
+        <label>ชื่อคลิป<input className={fieldClass} value={form.title} required maxLength={200} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+        <label>แบรนด์<input className={fieldClass} value={form.brand} required maxLength={120} onChange={(event) => setForm({ ...form, brand: event.target.value })} /></label>
+        <label>วัตถุประสงค์<select className={fieldClass} value={form.purpose} onChange={(event) => setForm({ ...form, purpose: event.target.value as DemoEdit['purpose'] })}>
+          {DEMO_PURPOSES.map((item) => <option key={item}>{item}</option>)}
+        </select></label>
+        <label>หมายเหตุ<textarea className={fieldClass} value={form.notes ?? ''} maxLength={2000} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+        <button type="submit" className="btn-primary w-fit" disabled={busy || !changed || !form.title.trim() || !form.brand.trim()}>บันทึกรายละเอียด</button>
+      </form>
+    </details>
+  );
+}
+
 function StyleCard({ style, demos, canWrite, refresh, choose }: {
   style: VideoStyle;
   demos: StyleDemo[];
@@ -168,7 +215,10 @@ function StyleCard({ style, demos, canWrite, refresh, choose }: {
   const [editing, setEditing] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
-  const demo = demos.find(({ id }) => id === selectedId) ?? demos[0];
+  // Approved clips first, then newest — so a fresh draft never replaces the
+  // approved example as the one the card shows by default.
+  const ordered = [...demos].sort((a, b) => Number(b.status === 'approved') - Number(a.status === 'approved'));
+  const demo = ordered.find(({ id }) => id === selectedId) ?? ordered[0];
 
   async function act(operation: () => Promise<string>) {
     setBusy(true);
@@ -189,12 +239,11 @@ function StyleCard({ style, demos, canWrite, refresh, choose }: {
       {demo ? (
         <>
           {demo.video_url ? (
-            <video key={demo.id} className="aspect-video w-full rounded-lg bg-black object-contain"
-              src={demo.video_url} poster={demo.poster_url ?? undefined} preload="metadata" autoPlay muted loop playsInline controls aria-label={demo.title} />
+            <LoopingDemo key={demo.id} src={demo.video_url} poster={demo.poster_url} title={demo.title} />
           ) : <p className="rounded-lg bg-gray-100 p-4 text-gray-700">เปิดไฟล์วิดีโอนี้ไม่ได้</p>}
           <label>คลิปตัวอย่าง
             <select className={fieldClass} value={demo.id} onChange={(event) => setSelectedId(event.target.value)}>
-              {demos.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.brand} · {item.status}</option>)}
+              {ordered.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.brand} · {item.status}</option>)}
             </select>
           </label>
           <p>{demo.purpose} · {Math.round(demo.duration_s)} วิ{demo.notes && ' · ' + demo.notes}</p>
@@ -213,8 +262,13 @@ function StyleCard({ style, demos, canWrite, refresh, choose }: {
               });
             }}>ลบคลิป</button>
           </div>}
+          {canWrite && <EditDemoForm key={demo.id + demo.purpose + demo.title} demo={demo} busy={busy} onSave={(fields) => act(async () => {
+            await requestJson(demoRoute, 'PATCH', { id: demo.id, ...fields });
+            await refresh();
+            return 'บันทึกรายละเอียดคลิปแล้ว';
+          })} />}
         </>
-      ) : <p className="grid aspect-video place-items-center rounded-lg border border-dashed border-gray-300 text-gray-500">ยังไม่มีคลิปตัวอย่าง</p>}
+      ) : <p className="mx-auto grid aspect-[9/16] w-full max-w-[240px] place-items-center rounded-lg border border-dashed border-gray-300 text-center text-gray-500">ยังไม่มีคลิปตัวอย่าง</p>}
       {canWrite && <UploadForm style={style} onUploaded={refresh} />}
       <button type="button" className="btn-primary w-fit" onClick={() => choose(style.code)}>ใช้สไตล์นี้สร้างคำสั่ง</button>
       <details>
